@@ -3,6 +3,8 @@ import type { RULES_ORDERING_TYPE } from '~/constants'
 import type { Rule, RuleProvider } from '~/types'
 import {
   IconAlertTriangle,
+  IconArrowBarToDown,
+  IconArrowBarToUp,
   IconArrowsSort,
   IconChevronDown,
   IconChevronUp,
@@ -747,10 +749,12 @@ async function openFullEditor() {
 
         <!-- Column headers -->
         <div
-          class="grid grid-cols-[auto_minmax(0,1fr)_auto_auto_auto] items-center gap-2 px-1 text-xs font-medium text-base-content/50"
+          class="grid grid-cols-[auto_minmax(0,1fr)_auto_auto_auto_auto_auto] items-center gap-2 px-1 text-xs font-medium text-base-content/50"
         >
           <span class="w-4" />
           <span>{{ t('rules') }}</span>
+          <span class="w-7" />
+          <span class="w-7" />
           <span class="w-7" />
           <span class="w-7" />
           <span class="w-7" />
@@ -760,7 +764,7 @@ async function openFullEditor() {
         <div
           v-for="(entry, index) in ruleEditor.rules.value"
           :key="index"
-          class="grid grid-cols-[auto_minmax(0,1fr)_auto_auto_auto] items-center gap-2 rounded-lg border border-base-content/8 bg-base-200/50 p-1.5"
+          class="grid grid-cols-[auto_minmax(0,1fr)_auto_auto_auto_auto_auto] items-center gap-2 rounded-lg border border-base-content/8 bg-base-200/50 p-1.5"
           :class="{ 'opacity-50': dragIndex === index }"
           draggable="true"
           @dragstart="onRuleDragStart(index)"
@@ -781,6 +785,14 @@ async function openFullEditor() {
           />
           <Button
             class="flex h-7 w-7 items-center justify-center rounded-md text-base-content/50 transition-colors hover:bg-primary/15 hover:text-primary disabled:opacity-30"
+            :title="t('moveToTop')"
+            :disabled="index === 0"
+            @click="ruleEditor.move(index, 0)"
+          >
+            <IconArrowBarToUp :size="16" />
+          </Button>
+          <Button
+            class="flex h-7 w-7 items-center justify-center rounded-md text-base-content/50 transition-colors hover:bg-primary/15 hover:text-primary disabled:opacity-30"
             :title="t('moveUp')"
             :disabled="index === 0"
             @click="ruleEditor.move(index, index - 1)"
@@ -794,6 +806,14 @@ async function openFullEditor() {
             @click="ruleEditor.move(index, index + 1)"
           >
             <IconChevronDown :size="16" />
+          </Button>
+          <Button
+            class="flex h-7 w-7 items-center justify-center rounded-md text-base-content/50 transition-colors hover:bg-primary/15 hover:text-primary disabled:opacity-30"
+            :title="t('moveToBottom')"
+            :disabled="index === ruleEditor.rules.value.length - 1"
+            @click="ruleEditor.move(index, ruleEditor.rules.value.length - 1)"
+          >
+            <IconArrowBarToDown :size="16" />
           </Button>
           <Button
             class="flex h-7 w-7 items-center justify-center rounded-md text-base-content/50 transition-colors hover:bg-error/15 hover:text-error"
