@@ -130,7 +130,11 @@ describe('composables/useProfiles', () => {
     api.importProfile.mockResolvedValue(meta('sub'))
     const p = useProfiles()
     await p.importUrl('http://sub', 'sub')
-    expect(api.importProfile).toHaveBeenCalledWith('http://sub', 'sub')
+    expect(api.importProfile).toHaveBeenCalledWith(
+      'http://sub',
+      'sub',
+      undefined,
+    )
     expect(api.listProfiles).toHaveBeenCalled()
   })
 
@@ -376,7 +380,7 @@ describe('composables/useProfiles', () => {
       api.listProfiles.mockResolvedValue([meta('a')])
       const p = useProfiles()
       const ok = await p.refreshRemote('a')
-      expect(api.refreshProfile).toHaveBeenCalledWith('a')
+      expect(api.refreshProfile).toHaveBeenCalledWith('a', undefined)
       expect(api.listProfiles).toHaveBeenCalled()
       expect(toast.success).toHaveBeenCalled()
       expect(ok).toBe(true)
@@ -402,7 +406,7 @@ describe('composables/useProfiles', () => {
       api.listProfiles.mockResolvedValue([meta('a')])
       const p = useProfiles()
       const ok = await p.refreshAndApply('a')
-      expect(api.refreshAndActivateProfile).toHaveBeenCalledWith('a')
+      expect(api.refreshAndActivateProfile).toHaveBeenCalledWith('a', undefined)
       expect(api.listProfiles).toHaveBeenCalled()
       expect(toast.success).toHaveBeenCalled()
       expect(ok).toBe(true)

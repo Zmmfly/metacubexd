@@ -8,8 +8,8 @@ import { join } from 'node:path'
 import { toNodeListener } from 'h3'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createControlRouter } from './http'
-import { SubscriptionFetchError } from './profiles'
 import { ProfileEditorConflictError } from './profile-editor'
+import { SubscriptionFetchError } from './profiles'
 import { TunPreconditionError } from './tun'
 
 function fakeState(over: Partial<KernelState> = {}): KernelState {
@@ -331,6 +331,7 @@ describe('createControlRouter — profiles + SSE', () => {
     expect(deps.profiles.importFromUrl).toHaveBeenCalledWith(
       'https://sub',
       'sub',
+      { useProxy: undefined },
     )
   })
 
@@ -363,7 +364,9 @@ describe('createControlRouter — profiles + SSE', () => {
       method: 'POST',
     })
     expect(res.status).toBe(200)
-    expect(deps.profiles.refresh).toHaveBeenCalledWith('p1')
+    expect(deps.profiles.refresh).toHaveBeenCalledWith('p1', {
+      useProxy: undefined,
+    })
     const body = (await res.json()) as Record<string, unknown>
     expect(body.id).toBe('p1')
     expect(body.type).toBe('remote')
@@ -378,7 +381,9 @@ describe('createControlRouter — profiles + SSE', () => {
       method: 'POST',
     })
     expect(res.status).toBe(200)
-    expect(deps.profiles.refresh).toHaveBeenCalledWith('p1')
+    expect(deps.profiles.refresh).toHaveBeenCalledWith('p1', {
+      useProxy: undefined,
+    })
     // Pure refresh never touches the running config — apply is a separate action.
     expect(deps.profiles.setActive).not.toHaveBeenCalled()
     expect(deps.supervisor.restart).not.toHaveBeenCalled()
@@ -392,7 +397,9 @@ describe('createControlRouter — profiles + SSE', () => {
       { method: 'POST' },
     )
     expect(res.status).toBe(200)
-    expect(deps.profiles.refresh).toHaveBeenCalledWith('p1')
+    expect(deps.profiles.refresh).toHaveBeenCalledWith('p1', {
+      useProxy: undefined,
+    })
     expect(deps.profiles.setActive).toHaveBeenCalledWith('p1')
     expect(deps.supervisor.validate).toHaveBeenCalledWith(deps.activeConfigPath)
     expect(deps.supervisor.restart).toHaveBeenCalledOnce()

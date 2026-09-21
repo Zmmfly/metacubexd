@@ -113,6 +113,8 @@ export function useControlApi() {
         enabled?: boolean
         // minutes; remote-only. 0 disables auto-update.
         updateInterval?: number
+        // remote-only fetch-via-proxy preference; null clears, omit keeps.
+        useProxy?: boolean | null
       },
     ) => client.put(`profiles/${id}`, { json: body }).json<ProfileMeta>(),
     // DELETE returns 204 No Content — there is no body to parse. Chaining
@@ -125,10 +127,10 @@ export function useControlApi() {
       client
         .post(`profiles/${id}/duplicate`, { json: { name } })
         .json<ProfileMeta>(),
-    importProfile: (url: string, name?: string) =>
+    importProfile: (url: string, name?: string, useProxy?: boolean) =>
       client
         .post('profiles/import', {
-          json: { url, name },
+          json: { url, name, useProxy },
           timeout: PROFILE_SUBSCRIPTION_TIMEOUT,
         })
         .json<ProfileMeta>(),
@@ -141,18 +143,20 @@ export function useControlApi() {
     // Re-fetch a REMOTE subscription in place (agent overwrites content +
     // subscriptionInfo + updatedAt, keeping the same id). Pure refresh — it does
     // NOT touch the running config; use refreshAndActivateProfile to apply.
-    refreshProfile: (id: string) =>
+    refreshProfile: (id: string, useProxy?: boolean) =>
       client
         .post(`profiles/${id}/refresh`, {
+          json: { useProxy },
           timeout: PROFILE_SUBSCRIPTION_TIMEOUT,
         })
         .json<ProfileMeta>(),
     // Combined refresh + apply: re-fetch, compose into active.yaml, validate,
     // and restart. The action users expect from "refresh and make it take
     // effect" (#2108). Returns the refreshed meta and the resulting state.
-    refreshAndActivateProfile: (id: string) =>
+    refreshAndActivateProfile: (id: string, useProxy?: boolean) =>
       client
         .post(`profiles/${id}/refresh-and-activate`, {
+          json: { useProxy },
           timeout: PROFILE_REFRESH_AND_ACTIVATE_TIMEOUT,
         })
         .json<{ meta: ProfileMeta; kernel: KernelState }>(),
@@ -204,7 +208,8 @@ export function useControlApi() {
 
     // Geo assets (capability-gated 'geo-assets'). POST downloads the geoip/
     // geosite/mmdb databases into the kernel home dir and echoes { ok, files }.
-    updateGeoAssets: () => client.post('geo/update').json<GeoUpdateResult>(),
+    updateGeoAssets: (useProxy?: boolean) =>
+      client.post('geo/update', { json: { useProxy } }).json<GeoUpdateResult>(),
 
     // Runtime config viewer (capability-gated 'runtime-config'). GET returns the
     // ACTUAL config file the kernel runs with -f as text/yaml (it carries the

@@ -99,8 +99,8 @@ export function useProfiles() {
     await api.deleteProfile(id)
     await refresh()
   }
-  const importUrl = async (url: string, name?: string) => {
-    await api.importProfile(url, name)
+  const importUrl = async (url: string, name?: string, useProxy?: boolean) => {
+    await api.importProfile(url, name, useProxy)
     await refresh()
   }
   // Re-fetch a remote subscription in place: the agent overwrites the stored
@@ -108,9 +108,12 @@ export function useProfiles() {
   // the fresh traffic/expiry numbers. The agent throws for non-remote profiles
   // (or on a network failure) — surface it via toast and return whether it
   // succeeded so the caller can react, never swallow it silently.
-  const refreshRemote = async (id: string): Promise<boolean> => {
+  const refreshRemote = async (
+    id: string,
+    useProxy?: boolean,
+  ): Promise<boolean> => {
     try {
-      await api.refreshProfile(id)
+      await api.refreshProfile(id, useProxy)
       await refresh()
       toast.success(t('profilesRefreshed'))
       return true
@@ -125,9 +128,12 @@ export function useProfiles() {
   // config + restart the kernel so the new nodes/rules actually route (#2108).
   // Distinct from refreshRemote (which only updates storage). A failed validation
   // surfaces as a toast; the agent restores the prior config in that case.
-  const refreshAndApply = async (id: string): Promise<boolean> => {
+  const refreshAndApply = async (
+    id: string,
+    useProxy?: boolean,
+  ): Promise<boolean> => {
     try {
-      await api.refreshAndActivateProfile(id)
+      await api.refreshAndActivateProfile(id, useProxy)
       await queryClient.invalidateQueries({ queryKey: queryKeys.config })
       await refresh()
       toast.success(t('profilesRefreshed'))
@@ -148,6 +154,12 @@ export function useProfiles() {
   // a refreshed active profile re-composes + restarts automatically (#2107).
   const setUpdateInterval = async (id: string, minutes: number) => {
     await api.updateProfile(id, { updateInterval: minutes })
+    await refresh()
+  }
+  // Persist a remote profile's fetch-via-proxy preference. Drives the
+  // scheduler's automatic refreshes; manual refreshes may still override.
+  const setUseProxy = async (id: string, useProxy: boolean) => {
+    await api.updateProfile(id, { useProxy })
     await refresh()
   }
   const load = (id: string): Promise<ProfileDetail> => api.getProfile(id)
@@ -249,6 +261,7 @@ export function useProfiles() {
     importUrl,
     refreshRemote,
     refreshAndApply,
+    setUseProxy,
     save,
     saveMerge,
     saveScript,

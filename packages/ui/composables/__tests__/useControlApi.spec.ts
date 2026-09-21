@@ -169,7 +169,7 @@ describe('composables/useControlApi methods', () => {
   it('importProfile() POSTs profiles/import', async () => {
     await useControlApi().importProfile('http://sub', 'subname')
     expect(post).toHaveBeenCalledWith('profiles/import', {
-      json: { url: 'http://sub', name: 'subname' },
+      json: { url: 'http://sub', name: 'subname', useProxy: undefined },
       timeout: 45_000,
     })
   })
@@ -184,6 +184,7 @@ describe('composables/useControlApi methods', () => {
   it('refreshProfile() POSTs profiles/:id/refresh', async () => {
     await useControlApi().refreshProfile('id1')
     expect(post).toHaveBeenCalledWith('profiles/id1/refresh', {
+      json: { useProxy: undefined },
       timeout: 45_000,
     })
   })
@@ -191,6 +192,7 @@ describe('composables/useControlApi methods', () => {
   it('refreshAndActivateProfile() POSTs profiles/:id/refresh-and-activate (#2108)', async () => {
     await useControlApi().refreshAndActivateProfile('id1')
     expect(post).toHaveBeenCalledWith('profiles/id1/refresh-and-activate', {
+      json: { useProxy: undefined },
       timeout: 390_000,
     })
   })
@@ -256,7 +258,9 @@ describe('composables/useControlApi methods', () => {
 
   it('updateGeoAssets() POSTs geo/update', async () => {
     await useControlApi().updateGeoAssets()
-    expect(post).toHaveBeenCalledWith('geo/update')
+    expect(post).toHaveBeenCalledWith('geo/update', {
+      json: { useProxy: undefined },
+    })
   })
 
   it('getRuntimeConfig() GETs config/runtime as text (text/yaml, not JSON)', async () => {

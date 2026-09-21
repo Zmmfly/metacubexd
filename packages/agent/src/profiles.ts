@@ -18,6 +18,12 @@ export interface ProfileStoreOptions {
   dir: string
   activeConfigPath: string
   fetch?: typeof fetch
+  // Fetch that routes through the kernel's local proxy (mixed port). Used when
+  // a profile has useProxy enabled or a manual refresh asks for it; in
+  // network-restricted regions the direct subscription download fails while
+  // the already-running proxy still works. Absent => 'useProxy' requests fall
+  // back to the direct fetch.
+  proxyFetch?: typeof fetch
   // Bounds subscription import/refresh network I/O; default 30_000.
   subscriptionTimeoutMs?: number
   idGen?: () => string
@@ -41,6 +47,7 @@ export class SubscriptionFetchError extends Error {
 export function createProfileStore(opts: ProfileStoreOptions): ProfileStore {
   const { dir, activeConfigPath, scriptRunner } = opts
   const doFetch = opts.fetch ?? fetch
+  const doProxyFetch = opts.proxyFetch ?? doFetch
   const subscriptionTimeoutMs = opts.subscriptionTimeoutMs ?? 30_000
   const idGen = opts.idGen ?? (() => randomUUID())
   const indexPath = join(dir, 'index.json')
@@ -108,17 +115,20 @@ export function createProfileStore(opts: ProfileStoreOptions): ProfileStore {
   }
 
   // Shared fetch+parse used by both importFromUrl (mints a new id) and
-  // refresh (overwrites an existing id) so the two stay DRY.
+  // refresh (overwrites an existing id) so the two stay DRY. `viaProxy`
+  // selects the proxied fetch (see ProfileStoreOptions.proxyFetch).
   async function fetchSubscription(
     url: string,
     userAgent: string,
+    viaProxy = false,
   ): Promise<{
     content: string
     subscriptionInfo: ProfileMeta['subscriptionInfo'] | undefined
   }> {
     const signal = AbortSignal.timeout(subscriptionTimeoutMs)
+    const netFetch = viaProxy ? doProxyFetch : doFetch
     try {
-      const res = await doFetch(url, {
+      const res = await netFetch(url, {
         headers: { 'User-Agent': userAgent },
         signal,
       })
@@ -202,6 +212,10 @@ export function createProfileStore(opts: ProfileStoreOptions): ProfileStore {
       if (p.enabled != null) meta.enabled = p.enabled
       // 0 is meaningful (disables auto-update) so distinguish it from omitted.
       if (p.updateInterval != null) meta.updateInterval = p.updateInterval
+      // Fetch-via-proxy preference for remote subscriptions. `null` clears the
+      // flag (back to direct); undefined leaves it untouched.
+      if (p.useProxy === null) delete meta.useProxy
+      else if (p.useProxy !== undefined) meta.useProxy = p.useProxy
       if (p.editorStatus === null) delete meta.editorStatus
       else if (p.editorStatus !== undefined) meta.editorStatus = p.editorStatus
       // Editor status is derived metadata; changing it must not reset the
@@ -261,12 +275,14 @@ export function createProfileStore(opts: ProfileStoreOptions): ProfileStore {
       return meta
     },
 
-    async importFromUrl(url, name) {
+    async importFromUrl(url, name, options) {
       await ensureDir()
       const userAgent = 'clash.meta'
+      const useProxy = options?.useProxy ?? false
       const { content, subscriptionInfo } = await fetchSubscription(
         url,
         userAgent,
+        useProxy,
       )
       const id = idGen()
       const meta: ProfileMeta = {
@@ -276,6 +292,7 @@ export function createProfileStore(opts: ProfileStoreOptions): ProfileStore {
         url,
         userAgent,
         updatedAt: Date.now(),
+        ...(useProxy ? { useProxy } : {}),
         ...(subscriptionInfo ? { subscriptionInfo } : {}),
       }
       await atomicWrite(profilePath(id), content)
@@ -283,7 +300,7 @@ export function createProfileStore(opts: ProfileStoreOptions): ProfileStore {
       return meta
     },
 
-    async refresh(id) {
+    async refresh(id, options) {
       const list = await readIndex()
       const meta = list.find((m) => m.id === id)
       if (!meta) throw new Error(`profile not found: ${id}`)
@@ -291,9 +308,13 @@ export function createProfileStore(opts: ProfileStoreOptions): ProfileStore {
         throw new Error(`refresh: profile ${id} is not a remote subscription`)
       }
       const userAgent = meta.userAgent ?? 'clash.meta'
+      // Manual refresh may override the persisted preference; the scheduler
+      // passes no option and therefore follows the profile's useProxy flag.
+      const viaProxy = options?.useProxy ?? meta.useProxy ?? false
       const { content, subscriptionInfo } = await fetchSubscription(
         meta.url,
         userAgent,
+        viaProxy,
       )
       // Overwrite the SAME file in place — keep the same id (no orphan).
       await atomicWrite(profilePath(id), content)

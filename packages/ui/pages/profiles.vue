@@ -3,6 +3,7 @@
 import type { ProfileMeta } from '~/types/control'
 import {
   IconBraces,
+  IconChevronDown,
   IconCopy,
   IconPencil,
   IconPlayerPlay,
@@ -50,6 +51,7 @@ const {
   setEnabled,
   setScriptEnabled,
   setUpdateInterval,
+  setUseProxy,
   load,
   validate,
   activate,
@@ -107,6 +109,26 @@ const notifyError = (e: unknown) =>
   toast.error(t('profilesActionFailed'), {
     description: controlErrorMessage(e),
   })
+
+// Collapse the parent <details class="dropdown"> after a menu action — daisyUI
+// dropdowns only close on outside click / Esc otherwise.
+const closeDropdown = (event: Event) => {
+  const details = (event.currentTarget as HTMLElement).closest('details')
+  details?.removeAttribute('open')
+}
+
+// Manual refresh via the dropdown: force a route (direct/proxy) for this one
+// fetch, then close the menu. Plain button clicks omit useProxy and follow the
+// profile's persisted preference.
+const onRefreshVia = (id: string, useProxy: boolean, event: Event) => {
+  closeDropdown(event)
+  onRefresh(id, useProxy)
+}
+
+const onRefreshAndApplyVia = (id: string, useProxy: boolean, event: Event) => {
+  closeDropdown(event)
+  onRefreshAndApply(id, useProxy)
+}
 
 // Honour prefers-reduced-motion for the one-shot editor scroll: a JS
 // scrollIntoView with an explicit behavior overrides the CSS reduced-motion
@@ -264,15 +286,17 @@ const onHeroImported = async () => {
   await refresh()
 }
 
-const onRefresh = (id: string) =>
+const onRefresh = (id: string, useProxy?: boolean) =>
   // refreshRemote toasts its own success/failure (incl. the "not remote" case).
-  withBusy(`refresh:${id}`, () => refreshRemote(id))
+  // Omitted useProxy follows the profile's persisted preference; the dropdown
+  // menu lets the user force direct/proxy for this one fetch.
+  withBusy(`refresh:${id}`, () => refreshRemote(id, useProxy))
 
 // Refresh + apply: re-fetch the subscription and re-compose + restart so the
 // new nodes actually route (#2108). Separate from onRefresh, which only updates
 // storage. refreshAndApply toasts its own success/failure.
-const onRefreshAndApply = (id: string) =>
-  withBusy(`refresh-apply:${id}`, () => refreshAndApply(id))
+const onRefreshAndApply = (id: string, useProxy?: boolean) =>
+  withBusy(`refresh-apply:${id}`, () => refreshAndApply(id, useProxy))
 
 // Preset auto-update intervals (minutes). 0 disables; the AIO server scheduler
 // refreshes remote profiles whose interval has elapsed and re-activates the
@@ -285,6 +309,17 @@ const onUpdateInterval = (p: ProfileMeta, event: Event) => {
   return withBusy(`interval:${p.id}`, async () => {
     try {
       await setUpdateInterval(p.id, minutes)
+    } catch (e) {
+      notifyError(e)
+    }
+  })
+}
+
+const onToggleUseProxy = (p: ProfileMeta, event: Event) => {
+  const next = (event.target as HTMLInputElement).checked
+  return withBusy(`useproxy:${p.id}`, async () => {
+    try {
+      await setUseProxy(p.id, next)
     } catch (e) {
       notifyError(e)
     }
@@ -445,6 +480,24 @@ const onCopyShareUrl = async () => {
             </select>
           </div>
 
+          <!-- Fetch-via-proxy preference (remote only): drives the auto-update
+               scheduler's route; manual refreshes may override per click. -->
+          <label
+            v-if="p.type === 'remote'"
+            class="mt-2 flex w-fit cursor-pointer items-center gap-2 text-sm"
+          >
+            <input
+              :checked="p.useProxy ?? false"
+              type="checkbox"
+              class="toggle shrink-0 toggle-primary toggle-xs"
+              :disabled="isBusy(`useproxy:${p.id}`)"
+              @change="onToggleUseProxy(p, $event)"
+            />
+            <span class="text-base-content/60">
+              {{ t('profilesFetchViaProxy') }}
+            </span>
+          </label>
+
           <div class="mt-3 flex flex-wrap gap-2">
             <Button
               v-if="hasFeature('visual-config-editor')"
@@ -462,24 +515,84 @@ const onCopyShareUrl = async () => {
             >
               {{ t('profilesEdit') }}
             </Button>
-            <Button
-              v-if="p.type === 'remote'"
-              class="btn-xs"
-              :icon="IconRefresh"
-              :loading="isBusy(`refresh:${p.id}`)"
-              @click="onRefresh(p.id)"
-            >
-              {{ t('profilesRefresh') }}
-            </Button>
-            <Button
-              v-if="p.type === 'remote'"
-              class="btn-success btn-xs"
-              :icon="IconRefresh"
-              :loading="isBusy(`refresh-apply:${p.id}`)"
-              @click="onRefreshAndApply(p.id)"
-            >
-              {{ t('profilesRefreshAndApply') }}
-            </Button>
+            <div v-if="p.type === 'remote'" class="flex items-center">
+              <Button
+                class="rounded-r-none btn-xs"
+                :icon="IconRefresh"
+                :loading="isBusy(`refresh:${p.id}`)"
+                @click="onRefresh(p.id)"
+              >
+                {{ t('profilesRefresh') }}
+              </Button>
+              <details class="dropdown dropdown-end">
+                <summary
+                  class="btn flex h-6 min-h-6 w-5 cursor-pointer items-center justify-center rounded-none rounded-r-lg border border-base-content/20 p-0"
+                  :title="t('profilesRefreshOptions')"
+                  @click.stop
+                >
+                  <IconChevronDown :size="12" />
+                </summary>
+                <ul
+                  class="menu dropdown-content z-30 w-44 rounded-lg border border-base-content/10 bg-base-100 p-1 shadow-lg"
+                >
+                  <li>
+                    <button
+                      class="text-xs"
+                      @click="onRefreshVia(p.id, false, $event)"
+                    >
+                      {{ t('profilesRefreshDirect') }}
+                    </button>
+                  </li>
+                  <li>
+                    <button
+                      class="text-xs"
+                      @click="onRefreshVia(p.id, true, $event)"
+                    >
+                      {{ t('profilesRefreshViaProxy') }}
+                    </button>
+                  </li>
+                </ul>
+              </details>
+            </div>
+            <div v-if="p.type === 'remote'" class="flex items-center">
+              <Button
+                class="rounded-r-none btn-success btn-xs"
+                :icon="IconRefresh"
+                :loading="isBusy(`refresh-apply:${p.id}`)"
+                @click="onRefreshAndApply(p.id)"
+              >
+                {{ t('profilesRefreshAndApply') }}
+              </Button>
+              <details class="dropdown dropdown-end">
+                <summary
+                  class="btn flex h-6 min-h-6 w-5 cursor-pointer items-center justify-center rounded-none rounded-r-lg border border-success/30 bg-success p-0 text-success-content"
+                  :title="t('profilesRefreshOptions')"
+                  @click.stop
+                >
+                  <IconChevronDown :size="12" />
+                </summary>
+                <ul
+                  class="menu dropdown-content z-30 w-44 rounded-lg border border-base-content/10 bg-base-100 p-1 shadow-lg"
+                >
+                  <li>
+                    <button
+                      class="text-xs"
+                      @click="onRefreshAndApplyVia(p.id, false, $event)"
+                    >
+                      {{ t('profilesRefreshDirect') }}
+                    </button>
+                  </li>
+                  <li>
+                    <button
+                      class="text-xs"
+                      @click="onRefreshAndApplyVia(p.id, true, $event)"
+                    >
+                      {{ t('profilesRefreshViaProxy') }}
+                    </button>
+                  </li>
+                </ul>
+              </details>
+            </div>
             <Button
               class="btn-xs"
               :icon="IconCopy"

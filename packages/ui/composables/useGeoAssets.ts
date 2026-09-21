@@ -18,10 +18,10 @@ export function useGeoAssets() {
   const available = computed(() => hasFeature('geo-assets'))
   const updating = ref(false)
 
-  const update = async () => {
+  const update = async (useProxy?: boolean) => {
     updating.value = true
     try {
-      const res = await api.updateGeoAssets()
+      const res = await api.updateGeoAssets(useProxy)
       toast.success(t('geoUpdateSuccess'), {
         description: res.files.join(', '),
       })

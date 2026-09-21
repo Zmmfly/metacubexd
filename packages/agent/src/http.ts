@@ -75,6 +75,9 @@ export interface ControlRouterDeps {
   kernelManager?: KernelManager // kernel version mgmt; capability-gated
   tunController?: TunController // TUN mode controller; capability-gated
   geoFetch?: typeof fetch // override for tests; defaults to global fetch
+  // Fetch through the kernel's local proxy (mixed port) for geo asset
+  // downloads; absent => 'useProxy' geo updates fall back to the direct fetch.
+  geoProxyFetch?: typeof fetch
   createWebdavClient?: typeof defaultCreateWebdavClient // override for tests
   readFile?: typeof defaultReadFile // override for tests; defaults to fs/promises readFile
 }
@@ -96,6 +99,7 @@ export function createControlRouter(deps: ControlRouterDeps): App {
     kernelManager,
     tunController,
     geoFetch,
+    geoProxyFetch,
     createWebdavClient = defaultCreateWebdavClient,
     readFile = defaultReadFile,
   } = deps
@@ -288,6 +292,8 @@ export function createControlRouter(deps: ControlRouterDeps): App {
         enabled?: boolean
         // minutes; remote-only. 0 disables auto-update; omit leaves it untouched.
         updateInterval?: number
+        // remote-only fetch-via-proxy preference; null clears, omit keeps.
+        useProxy?: boolean | null
       }
       const meta = (await profiles.list()).find((item) => item.id === id)
       if (meta?.managedBy === 'visual-editor') {
@@ -320,9 +326,15 @@ export function createControlRouter(deps: ControlRouterDeps): App {
   router.post(
     `${PREFIX}/profiles/import`,
     defineEventHandler(async (event) => {
-      const body = (await readBody(event)) as { url: string; name?: string }
+      const body = (await readBody(event)) as {
+        url: string
+        name?: string
+        useProxy?: boolean
+      }
       return withSubscriptionHttpError(() =>
-        profiles.importFromUrl(body.url, body.name),
+        profiles.importFromUrl(body.url, body.name, {
+          useProxy: body.useProxy,
+        }),
       )
     }),
   )
@@ -330,10 +342,15 @@ export function createControlRouter(deps: ControlRouterDeps): App {
     `${PREFIX}/profiles/:id/refresh`,
     defineEventHandler(async (event) => {
       const id = getRouterParam(event, 'id')!
+      const body = (await readBody(event).catch(() => ({}))) as {
+        useProxy?: boolean
+      }
       // Pure refresh: re-fetch the remote subscription in place and return the
       // updated meta. This does NOT touch the running config — pair it with
       // activate, or use /refresh-and-activate for a combined apply (#2108).
-      return withSubscriptionHttpError(() => profiles.refresh(id))
+      return withSubscriptionHttpError(() =>
+        profiles.refresh(id, { useProxy: body?.useProxy }),
+      )
     }),
   )
   // Combined refresh + apply: re-fetch the subscription, compose it into
@@ -345,7 +362,12 @@ export function createControlRouter(deps: ControlRouterDeps): App {
     `${PREFIX}/profiles/:id/refresh-and-activate`,
     defineEventHandler(async (event) => {
       const id = getRouterParam(event, 'id')!
-      const meta = await withSubscriptionHttpError(() => profiles.refresh(id))
+      const body = (await readBody(event).catch(() => ({}))) as {
+        useProxy?: boolean
+      }
+      const meta = await withSubscriptionHttpError(() =>
+        profiles.refresh(id, { useProxy: body?.useProxy }),
+      )
       const kernel = await safeActivate(id)
       return { meta, kernel }
     }),
@@ -532,8 +554,12 @@ export function createControlRouter(deps: ControlRouterDeps): App {
   // ---- Geo assets (always available — backed by homeDir + fetch) ----
   router.post(
     `${PREFIX}/geo/update`,
-    defineEventHandler(async () => {
-      const { files } = await fetchGeoAssets(homeDir, { fetch: geoFetch })
+    defineEventHandler(async (event) => {
+      const body = (await readBody(event).catch(() => ({}))) as {
+        useProxy?: boolean
+      }
+      const netFetch = body?.useProxy ? (geoProxyFetch ?? geoFetch) : geoFetch
+      const { files } = await fetchGeoAssets(homeDir, { fetch: netFetch })
       return { ok: true, files }
     }),
   )

@@ -1,6 +1,11 @@
 <!-- packages/ui/components/KernelVersionPanel.vue -->
 <script setup lang="ts">
-import { IconCpu, IconDatabase, IconDownload } from '@tabler/icons-vue'
+import {
+  IconChevronDown,
+  IconCpu,
+  IconDatabase,
+  IconDownload,
+} from '@tabler/icons-vue'
 
 const { t } = useI18n()
 const kernelVersions = useKernelVersions()
@@ -21,6 +26,18 @@ const { available: geoAvailable, updating } = geo
 const cardVisible = computed(
   () => versionsAvailable.value || geoAvailable.value,
 )
+
+// Collapse the parent <details class="dropdown"> after a menu action.
+const closeDropdown = (event: Event) => {
+  const details = (event.currentTarget as HTMLElement).closest('details')
+  details?.removeAttribute('open')
+}
+
+// Geo update via proxy from the dropdown (plain button click stays direct).
+const onGeoUpdateViaProxy = (event: Event) => {
+  closeDropdown(event)
+  geo.update(true)
+}
 
 onMounted(() => {
   if (!versionsAvailable.value) return
@@ -72,7 +89,7 @@ onMounted(() => {
 
       <div class="mt-3 flex flex-wrap gap-2">
         <Button
-          class="btn-sm btn-primary"
+          class="btn-primary btn-sm"
           :icon="IconDownload"
           :loading="switching"
           :disabled="loading || switching || !selected || selected === current"
@@ -95,15 +112,35 @@ onMounted(() => {
           <IconDatabase :size="18" />
           {{ t('geoAssets') }}
         </span>
-        <Button
-          class="btn-sm btn-secondary"
-          :icon="IconDownload"
-          :loading="updating"
-          :disabled="updating"
-          @click="geo.update()"
-        >
-          {{ t('geoUpdate') }}
-        </Button>
+        <div class="flex items-center">
+          <Button
+            class="rounded-r-none btn-secondary btn-sm"
+            :icon="IconDownload"
+            :loading="updating"
+            :disabled="updating"
+            @click="geo.update()"
+          >
+            {{ t('geoUpdate') }}
+          </Button>
+          <details class="dropdown dropdown-end">
+            <summary
+              class="btn flex h-8 min-h-8 w-6 cursor-pointer items-center justify-center rounded-none rounded-r-lg border-0 bg-secondary p-0 text-secondary-content"
+              :title="t('profilesRefreshOptions')"
+              @click.stop
+            >
+              <IconChevronDown :size="14" />
+            </summary>
+            <ul
+              class="menu dropdown-content z-30 w-44 rounded-lg border border-base-content/10 bg-base-100 p-1 shadow-lg"
+            >
+              <li>
+                <button class="text-xs" @click="onGeoUpdateViaProxy">
+                  {{ t('geoUpdateViaProxy') }}
+                </button>
+              </li>
+            </ul>
+          </details>
+        </div>
       </div>
       <p class="mt-2 text-sm text-base-content/60">
         {{ t('geoAssetsDescription') }}

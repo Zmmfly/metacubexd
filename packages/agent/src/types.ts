@@ -106,6 +106,10 @@ export interface ProfileMeta {
   url?: string
   userAgent?: string
   updateInterval?: number // minutes; only meaningful for remote profiles
+  // Remote-only: fetch this subscription through the kernel's local proxy
+  // instead of directly. Drives the auto-update scheduler; manual refreshes
+  // may override it per request.
+  useProxy?: boolean
   // Managed merge overlays may be scoped to one base profile. Legacy merges
   // omit this field and remain global.
   baseProfileId?: string
@@ -140,13 +144,26 @@ export interface ProfileStore {
       // minutes; only meaningful for remote profiles (drives the scheduler).
       // 0 disables auto-update; omit leaves the stored value untouched.
       updateInterval?: number
+      // Remote-only fetch-via-proxy preference. `null` clears it; undefined
+      // leaves the stored value untouched.
+      useProxy?: boolean | null
       editorStatus?: 'clean' | 'conflicted' | null
     },
   ) => Promise<ProfileMeta>
   delete: (id: string) => Promise<void>
   duplicate: (id: string, name?: string) => Promise<ProfileMeta>
-  importFromUrl: (url: string, name?: string) => Promise<ProfileMeta> // UA 'clash.meta'
-  refresh: (id: string) => Promise<ProfileMeta> // re-fetch a remote profile in place
+  importFromUrl: (
+    url: string,
+    name?: string,
+    options?: { useProxy?: boolean },
+  ) => Promise<ProfileMeta> // UA 'clash.meta'
+  // Re-fetch a remote profile in place. `options.useProxy` overrides the
+  // profile's persisted preference for this one fetch; omitted => follow the
+  // stored useProxy flag (what the scheduler does).
+  refresh: (
+    id: string,
+    options?: { useProxy?: boolean },
+  ) => Promise<ProfileMeta>
   getActiveId: () => Promise<string | undefined>
   setActive: (id: string) => Promise<void> // validate + write activeConfigPath
   // Compose a base with its enabled merge/script layers. Overrides are used by

@@ -85,6 +85,7 @@ catalog:
   tree-kill: ^1.2.2
   tsx: ^4.23.11
   typescript: ^7.0.2
+  undici: ^7.28.0
   uqr: ^0.1.2
   vite: 8.2.1
   vitest: ^4.1.10

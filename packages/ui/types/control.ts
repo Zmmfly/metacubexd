@@ -38,6 +38,10 @@ export interface ProfileMeta {
   // minutes; remote-only. Drives the AIO server's auto-update scheduler (0 or
   // undefined => auto-update off). SHARED CONTRACTS.
   updateInterval?: number
+  // remote-only: fetch this subscription through the kernel's local proxy
+  // instead of directly (drives the scheduler; manual refresh may override).
+  // SHARED CONTRACTS.
+  useProxy?: boolean
   baseProfileId?: string
   managedBy?: 'visual-editor'
   editorStatus?: 'clean' | 'conflicted'

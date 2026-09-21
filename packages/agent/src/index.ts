@@ -9,6 +9,7 @@ import { createControlRouter } from './http'
 import { MIHOMO_VERSION } from './kernel/assets'
 import { createProfileConfigEditor } from './profile-editor'
 import { createProfileStore } from './profiles'
+import { createProxiedFetch } from './proxy-fetch'
 import { applyActiveRefresh } from './refresh-apply'
 import { createProfileScheduler } from './scheduler'
 import { createScriptRunner } from './script'
@@ -35,6 +36,7 @@ export type {
   ProfileEditorSnapshot,
 } from './profile-editor'
 export { createProfileStore } from './profiles'
+export { createProxiedFetch } from './proxy-fetch'
 export { applyActiveRefresh } from './refresh-apply'
 export { createProfileScheduler } from './scheduler'
 export type {
@@ -75,9 +77,17 @@ export interface AgentInfo {
 }
 
 export function createAgent(opts: CreateAgentOptions) {
+  // Fetch through the kernel's own mixed port for subscription/geo downloads
+  // the user routes via proxy (network-restricted regions). Only available
+  // when the kernel has a mixed port configured; TUN-only setups (mixedPort 0)
+  // keep direct-only behavior.
+  const proxyFetch = opts.mixedPort
+    ? createProxiedFetch(`http://127.0.0.1:${opts.mixedPort}`)
+    : undefined
   const profiles = createProfileStore({
     dir: opts.profilesDir,
     activeConfigPath: opts.activeConfigPath,
+    proxyFetch,
     // Without a runner, script profiles are silently skipped during compose —
     // the user's script transforms never apply. Default to a real one so the
     // feature works across every Runtime Form (server/desktop) out of the box.
@@ -132,6 +142,7 @@ export function createAgent(opts: CreateAgentOptions) {
     systemProxy,
     kernelManager,
     tunController,
+    geoProxyFetch: proxyFetch,
   })
   // Wire the auto-update scheduler to the same profiles store. NOT started here
   // — the server boot plugin starts it (the desktop builds its own scheduler so

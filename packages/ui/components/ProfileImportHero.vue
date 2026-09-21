@@ -27,6 +27,12 @@ const busy = ref(false)
 const errorMessage = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
 
+// Whether to fetch the subscription through the kernel's local proxy instead
+// of directly — for regions where direct access to the provider fails. The
+// choice persists onto the created profile's useProxy flag and drives its
+// future auto-updates.
+const useProxy = ref(false)
+
 // Reject pathologically large pastes/files early — a real subscription config is
 // kilobytes, not megabytes.
 const MAX_FILE_BYTES = 1024 * 1024
@@ -56,6 +62,7 @@ onMounted(() => {
 const afterImport = async (meta: ProfileMeta) => {
   url.value = ''
   name.value = ''
+  useProxy.value = false
   errorMessage.value = ''
   await profileStatus.refresh()
   emit('imported', meta)
@@ -73,7 +80,11 @@ const onImportUrl = async () => {
   busy.value = true
   errorMessage.value = ''
   try {
-    const meta = await api.importProfile(u, name.value.trim() || undefined)
+    const meta = await api.importProfile(
+      u,
+      name.value.trim() || undefined,
+      useProxy.value || undefined,
+    )
     await afterImport(meta)
   } catch (e) {
     reportError(e)
@@ -189,6 +200,18 @@ const onClipboard = async () => {
           {{ t('profilesImport') }}
         </Button>
       </div>
+
+      <label class="flex w-fit cursor-pointer items-center gap-2 text-sm">
+        <input
+          v-model="useProxy"
+          type="checkbox"
+          class="toggle shrink-0 toggle-primary toggle-xs"
+          :disabled="busy"
+        />
+        <span class="text-base-content/70">
+          {{ t('profilesFetchViaProxy') }}
+        </span>
+      </label>
 
       <div class="flex flex-wrap items-center gap-2">
         <Button
