@@ -127,6 +127,14 @@ overrides:
   serialize-javascript: '>=7.0.5'
   srvx: '>=0.11.16'
   tar: '>=7.5.15'
+  # typescript-eslint@8.67 rejects typescript@7 at runtime (its peer range is
+  # <6.1.0), which breaks the lint-staged eslint step. Remap every eslint-side
+  # typescript@7 resolution to the latest 6.x so the parser stays on a
+  # supported compiler, while vue-tsc / builds keep using TS 7 from the
+  # catalog. Remove once typescript-eslint supports TS 7 (issue #10940).
+  typescript: 6.0.3
+  'vue-tsc>typescript': 7.0.2
+  'vite-plugin-checker>typescript': 7.0.2
   'undici@6': ^6.27.0
   'undici@7': ^7.28.0
   # Pin the exact rolldown-vite version (was '@latest'). @latest is a moving
