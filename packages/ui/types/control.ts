@@ -148,6 +148,12 @@ export interface GeoUpdateResult {
 // for geo asset downloads (SHARED CONTRACTS).
 export interface AgentSettings {
   geoIdleTimeoutMs: number
+  // Agent-level overrides for the panel-editable runtime config switches
+  // (allow-lan, mode, log-level, ...). The supervisor injects them into
+  // active.yaml at spawn, so they outlive profile switches. PUT shallow-merges
+  // this bag; `configOverrideKeys` deletes the listed keys instead.
+  // SHARED CONTRACTS.
+  configOverrides: Record<string, unknown>
 }
 
 // WebDAV backup/restore (capability-gated 'webdav-backup'). Credentials are

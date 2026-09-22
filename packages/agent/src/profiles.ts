@@ -13,6 +13,7 @@ import {
 import { join } from 'node:path'
 import { parse, stringify } from 'yaml'
 import { ConfigPatchConflictError, isPlainObject, mergeConfigs } from './merge'
+import { pickConfigOverrides } from './settings'
 
 export interface ProfileStoreOptions {
   dir: string
@@ -30,6 +31,12 @@ export interface ProfileStoreOptions {
   // Runs enabled 'script' profiles during setActive. Injected so tests use a
   // fake (no real worker). Absent runner => script profiles are skipped.
   scriptRunner?: ScriptRunner
+  // Called after a remote subscription import with the panel-editable scalars
+  // (CONFIG_OVERRIDE_KEYS) found in its raw YAML. Wired by createAgent to seed
+  // the agent-level config overrides so the first refresh does not silently
+  // drop a switch the subscription carried. Best effort: the import itself has
+  // already succeeded, so a settings failure never fails the import.
+  onImportOverrides?: (values: Record<string, unknown>) => void | Promise<void>
 }
 
 interface StateFile {
@@ -297,6 +304,19 @@ export function createProfileStore(opts: ProfileStoreOptions): ProfileStore {
       }
       await atomicWrite(profilePath(id), content)
       await writeIndex([...(await readIndex()), meta])
+      // A freshly imported subscription may already carry the switches the panel
+      // exposes (allow-lan, mode, …). Seed them as instance-level overrides so
+      // the first refresh — which overwrites this file verbatim — does not
+      // revert them. Only keys without an override are filled in.
+      const seed = pickConfigOverrides(content)
+      if (opts.onImportOverrides && Object.keys(seed).length > 0) {
+        try {
+          await opts.onImportOverrides(seed)
+        } catch {
+          // Best effort: the profile is already imported, so a settings write
+          // failure must not report the import itself as failed.
+        }
+      }
       return meta
     },
 

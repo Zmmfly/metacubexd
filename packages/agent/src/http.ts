@@ -1,7 +1,7 @@
 import type { ConfigPatchV1 } from '@metacubexd/config-editor'
 import type { App, H3Event } from 'h3'
 import type { ProfileConfigEditor } from './profile-editor'
-import type { AgentSettingsStore } from './settings'
+import type { AgentSettings, AgentSettingsStore } from './settings'
 import type {
   KernelLogLine,
   KernelManager,
@@ -28,12 +28,18 @@ import {
   setResponseStatus,
 } from 'h3'
 import { fetchGeoAssets } from './kernel/geo'
-import { ConfigPatchConflictError } from './merge'
+import { ConfigPatchConflictError, isPlainObject } from './merge'
 import {
   ProfileEditorConflictError,
   ProfileEditorValidationError,
 } from './profile-editor'
 import { SubscriptionFetchError } from './profiles'
+import {
+  isConfigOverrideKey,
+  isConfigOverrideValue,
+  mergeConfigOverrides,
+  patchConfigOverrides,
+} from './settings'
 import { TunPreconditionError } from './tun'
 import { createWebdavClient as defaultCreateWebdavClient } from './webdav'
 
@@ -551,6 +557,18 @@ export function createControlRouter(deps: ControlRouterDeps): App {
       }
       await profiles.setSection(activeId, body.key, body.value)
       await profiles.setActive(activeId)
+      // Mirror a panel-editable switch into the instance-level overrides so the
+      // NEXT start re-injects it even after a subscription refresh rewrote the
+      // profile file (profiles.refresh() overwrites it verbatim). A null value
+      // deletes the override; non-whitelisted keys (rules, dns, …) keep the
+      // legacy profile-only write.
+      if (settings && isConfigOverrideKey(body.key)) {
+        await patchConfigOverrides(
+          settings,
+          body.value == null ? {} : { [body.key]: body.value },
+          body.value == null ? [body.key] : [],
+        )
+      }
       if (body.restart === false) return supervisor.getState()
       return supervisor.restart()
     }),
@@ -570,6 +588,12 @@ export function createControlRouter(deps: ControlRouterDeps): App {
       if (!settings) throw createError({ statusCode: 404 })
       const body = (await readBody(event)) as {
         geoIdleTimeoutMs?: number
+        // Shallow-merged into the stored override bag (NOT a replacement), so
+        // a UI saving one switch cannot drop the others.
+        configOverrides?: Record<string, unknown>
+        // Keys cleared from the stored bag in the same call. Applied after the
+        // merge, so a delete always beats a set.
+        configOverrideKeys?: string[]
       }
       if (
         body.geoIdleTimeoutMs !== undefined &&
@@ -582,7 +606,51 @@ export function createControlRouter(deps: ControlRouterDeps): App {
           statusMessage: 'geoIdleTimeoutMs must be 1000..3600000',
         })
       }
-      return settings.update(body)
+      if (
+        body.configOverrides !== undefined &&
+        !isPlainObject(body.configOverrides)
+      ) {
+        throw createError({
+          statusCode: 400,
+          statusMessage: 'configOverrides must be an object of scalars',
+        })
+      }
+      // Reject rather than silently drop: a caller that sends a nested object
+      // (dns/tun-like) must learn it does not belong in this bag.
+      for (const [key, value] of Object.entries(body.configOverrides ?? {})) {
+        if (key.length === 0 || !isConfigOverrideValue(value)) {
+          throw createError({
+            statusCode: 400,
+            statusMessage: `configOverrides values must be scalars (string/number/boolean): ${key || '(empty key)'}`,
+          })
+        }
+      }
+      if (
+        body.configOverrideKeys !== undefined &&
+        (!Array.isArray(body.configOverrideKeys) ||
+          body.configOverrideKeys.some((key) => typeof key !== 'string'))
+      ) {
+        throw createError({
+          statusCode: 400,
+          statusMessage: 'configOverrideKeys must be an array of strings',
+        })
+      }
+      const patch: Partial<AgentSettings> = {}
+      if (body.geoIdleTimeoutMs !== undefined) {
+        patch.geoIdleTimeoutMs = body.geoIdleTimeoutMs
+      }
+      if (
+        body.configOverrides !== undefined ||
+        body.configOverrideKeys !== undefined
+      ) {
+        const current = await settings.read()
+        patch.configOverrides = mergeConfigOverrides(
+          current.configOverrides,
+          body.configOverrides,
+          body.configOverrideKeys,
+        )
+      }
+      return settings.update(patch)
     }),
   )
 

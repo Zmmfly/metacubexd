@@ -221,8 +221,12 @@ export function useControlApi() {
         })
         .json<GeoUpdateResult>(),
     getSettings: () => client.get('settings').json<AgentSettings>(),
-    updateSettings: (patch: Partial<AgentSettings>) =>
-      client.put('settings', { json: patch }).json<AgentSettings>(),
+    // `configOverrides` is shallow-merged over the stored bag; the optional
+    // `configOverrideKeys` deletes the listed keys in the same call (SHARED
+    // CONTRACTS).
+    updateSettings: (
+      patch: Partial<AgentSettings> & { configOverrideKeys?: string[] },
+    ) => client.put('settings', { json: patch }).json<AgentSettings>(),
 
     // Runtime config viewer (capability-gated 'runtime-config'). GET returns the
     // ACTUAL config file the kernel runs with -f as text/yaml (it carries the

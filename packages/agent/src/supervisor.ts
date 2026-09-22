@@ -1,5 +1,6 @@
 import type { Buffer } from 'node:buffer'
 import type { ChildProcess } from 'node:child_process'
+import type { ConfigOverrides, ConfigOverrideValue } from './settings'
 import type {
   KernelLogLine,
   KernelState,
@@ -11,7 +12,8 @@ import { randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import treeKillDefault from 'tree-kill'
-import { parse } from 'yaml'
+import { parse, stringify } from 'yaml'
+import { sanitizeConfigOverrides } from './settings'
 
 export interface SupervisorDeps {
   spawn?: (cmd: string, args: string[], opts?: object) => ChildProcess
@@ -28,6 +30,31 @@ export type CreateSupervisorOptions = SupervisorOptions & {
   externalController?: string
   secret?: string
   mixedPort?: number // optional: injected as `mixed-port:` into the active YAML before spawn
+  // Instance-level overrides for the panel-editable runtime switches (agent
+  // settings -> see settings.ts CONFIG_OVERRIDE_KEYS). Injected as top-level
+  // `key: value` lines and stripped from the profile, so a subscription refresh
+  // that overwrites the profile file cannot revert them. A function is
+  // re-resolved on every spawn (the settings bag lives in a file read
+  // asynchronously); non-scalar values are skipped.
+  configOverrides?:
+    Record<string, unknown> | (() => Promise<Record<string, unknown>>)
+}
+
+// Top-level keys the supervisor owns: they are stripped from the profile and
+// rewritten with the managed values on every spawn.
+const MANAGED_CLASH_KEYS = new Set([
+  'external-controller',
+  'secret',
+  'mixed-port',
+])
+
+// Serialize one override as a top-level YAML scalar. YAML keeps `info`/`true`/
+// `7890` unquoted; a value that would need a multi-line block scalar (a string
+// containing newlines) falls back to a double-quoted JSON scalar, which YAML
+// parses back to the same string.
+function serializeOverride(key: string, value: ConfigOverrideValue): string {
+  const rendered = stringify(value).trimEnd()
+  return `${key}: ${rendered.includes('\n') ? JSON.stringify(value) : rendered}`
 }
 
 // Tiny async mutex: serializes lifecycle ops so two tabs can't double-spawn.
@@ -178,6 +205,16 @@ export function createSupervisor(
     }
   }
 
+  // Resolve the instance-level overrides for this spawn. A function source is
+  // called every time so a panel edit is picked up by the next (re)start; a
+  // static object is used as-is. Only scalars survive sanitization.
+  async function resolveConfigOverrides(): Promise<ConfigOverrides> {
+    const source = opts.configOverrides
+    if (!source) return {}
+    const values = typeof source === 'function' ? await source() : source
+    return sanitizeConfigOverrides(values)
+  }
+
   // Before spawn, force mihomo to bind the Clash API where the supervisor polls.
   // We rewrite the active YAML in place: strip any top-level external-controller/
   // secret/mixed-port lines the profile carried, then prepend our managed values
@@ -185,12 +222,24 @@ export function createSupervisor(
   // A managed mixed port must also be the sole listener on that number: mihomo
   // otherwise keeps the earlier port/socks-port listener and silently reports
   // mixed-port=0 at runtime even though active.yaml still says 7890 (#2136).
+  // Instance-level overrides (agent settings) are stripped and re-injected the
+  // same way, so a subscription refresh that rewrote the profile cannot revert
+  // them.
   async function injectClashConfig(): Promise<void> {
     let existing = ''
     if (existsSync(opts.activeConfigPath)) {
       existing = await readFile(opts.activeConfigPath, 'utf8')
     }
-    const managedKeys = new Set(['external-controller', 'secret', 'mixed-port'])
+    const overrides = await resolveConfigOverrides()
+    // The supervisor-owned keys always win; injecting a duplicate top-level key
+    // would make mihomo's YAML parser reject the file.
+    const overrideLines = Object.entries(overrides)
+      .filter(([key]) => !MANAGED_CLASH_KEYS.has(key))
+      .map(([key, value]) => serializeOverride(key, value))
+    const managedKeys = new Set([
+      ...MANAGED_CLASH_KEYS,
+      ...Object.keys(overrides),
+    ])
     const listenerPortKeys = new Set([
       'port',
       'socks-port',
@@ -220,6 +269,7 @@ export function createSupervisor(
       `external-controller: ${state.externalController}`,
       `secret: ${state.secret}`,
       ...(mixedPort != null ? [`mixed-port: ${mixedPort}`] : []),
+      ...overrideLines,
       '',
     ].join('\n')
     await writeFile(opts.activeConfigPath, header + kept)

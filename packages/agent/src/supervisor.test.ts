@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import { parse } from 'yaml'
 import { createSupervisor } from './supervisor'
 
 // Minimal ChildProcess double: stdout/stderr emitters + kill spy + emit-exit helper.
@@ -291,6 +292,158 @@ describe('createSupervisor — initial state', () => {
     const st = await sup.start()
     expect(st.status).toBe('errored')
     expect(st.lastExitCode).toBe(1)
+    await sup.dispose()
+  })
+})
+
+describe('createSupervisor — config override injection', () => {
+  function ready200() {
+    return (async () =>
+      new Response(JSON.stringify({ version: '1.19.27' }), {
+        status: 200,
+      })) as unknown as typeof fetch
+  }
+
+  it('injects configOverrides into the header and strips the profile copies', async () => {
+    const opts = baseOpts()
+    writeFileSync(
+      opts.activeConfigPath,
+      [
+        'allow-lan: false',
+        'mode: direct',
+        'log-level: info',
+        'port: 7890',
+        'proxies: []',
+        '',
+      ].join('\n'),
+    )
+    const proc = new FakeProc()
+    const sup = createSupervisor(
+      {
+        ...opts,
+        configOverrides: {
+          'allow-lan': true,
+          mode: 'rule',
+          'log-level': 'warning',
+        },
+      },
+      { spawn: (() => proc) as never, fetch: ready200() },
+    )
+    await sup.start()
+    const written = readFileSync(opts.activeConfigPath, 'utf8')
+    // Injected exactly once, with the profile's own value stripped.
+    expect(written).toContain('allow-lan: true')
+    expect(written).toContain('mode: rule')
+    expect(written).toContain('log-level: warning')
+    expect(written).not.toContain('allow-lan: false')
+    expect(written).not.toContain('mode: direct')
+    expect(written).not.toContain('log-level: info')
+    expect(
+      written.split('\n').filter((line) => line.startsWith('mode:')),
+    ).toHaveLength(1)
+    // Untouched profile content survives.
+    expect(written).toContain('port: 7890')
+    expect(written).toContain('proxies: []')
+    await sup.dispose()
+  })
+
+  it('re-resolves a function overrides source on every spawn', async () => {
+    const opts = baseOpts()
+    writeFileSync(opts.activeConfigPath, 'proxies: []\n')
+    let resolved = 0
+    const sup = createSupervisor(
+      {
+        ...opts,
+        configOverrides: async () => {
+          resolved++
+          // The settings bag behaves like this: the value read at spawn time
+          // is the one that lands in active.yaml.
+          return { mode: resolved === 1 ? 'rule' : 'global' }
+        },
+      },
+      { spawn: (() => new FakeProc()) as never, fetch: ready200() },
+    )
+    await sup.start()
+    expect(readFileSync(opts.activeConfigPath, 'utf8')).toContain('mode: rule')
+    await sup.restart()
+    expect(readFileSync(opts.activeConfigPath, 'utf8')).toContain(
+      'mode: global',
+    )
+    expect(resolved).toBe(2)
+    await sup.dispose()
+  })
+
+  it('serializes scalars as YAML values that parse back to the same value', async () => {
+    const opts = baseOpts()
+    writeFileSync(opts.activeConfigPath, 'proxies: []\n')
+    const proc = new FakeProc()
+    const sup = createSupervisor(
+      {
+        ...opts,
+        configOverrides: {
+          'allow-lan': true,
+          ipv6: false,
+          'interface-name': 'a: b',
+          'log-level': 'debug',
+        },
+      },
+      { spawn: (() => proc) as never, fetch: ready200() },
+    )
+    await sup.start()
+    const parsed = parse(readFileSync(opts.activeConfigPath, 'utf8'))
+    expect(parsed).toMatchObject({
+      'allow-lan': true,
+      ipv6: false,
+      'interface-name': 'a: b',
+      'log-level': 'debug',
+    })
+    await sup.dispose()
+  })
+
+  it('skips non-scalar overrides and leaves the profile key untouched', async () => {
+    const opts = baseOpts()
+    writeFileSync(
+      opts.activeConfigPath,
+      'dns:\n  nameserver: [1.1.1.1]\nmode: direct\n',
+    )
+    const proc = new FakeProc()
+    const sup = createSupervisor(
+      {
+        ...opts,
+        configOverrides: { dns: { nameserver: ['8.8.8.8'] }, mode: 'rule' },
+      },
+      { spawn: (() => proc) as never, fetch: ready200() },
+    )
+    await sup.start()
+    const written = readFileSync(opts.activeConfigPath, 'utf8')
+    // The nested value is not injectable, so the profile's own block survives.
+    expect(written).toContain('  nameserver: [1.1.1.1]')
+    expect(written).not.toContain('8.8.8.8')
+    // ...while the scalar sibling is still managed.
+    expect(written).toContain('mode: rule')
+    expect(written).not.toContain('mode: direct')
+    await sup.dispose()
+  })
+
+  it('never lets an override shadow the supervisor-owned keys', async () => {
+    const opts = baseOpts()
+    writeFileSync(opts.activeConfigPath, 'proxies: []\n')
+    const proc = new FakeProc()
+    const sup = createSupervisor(
+      {
+        ...opts,
+        secret: 'managed-secret',
+        configOverrides: { secret: 'user-secret', 'allow-lan': true },
+      },
+      { spawn: (() => proc) as never, fetch: ready200() },
+    )
+    await sup.start()
+    const written = readFileSync(opts.activeConfigPath, 'utf8')
+    expect(
+      written.split('\n').filter((line) => line.startsWith('secret:')),
+    ).toEqual(['secret: managed-secret'])
+    expect(written).not.toContain('user-secret')
+    expect(written).toContain('allow-lan: true')
     await sup.dispose()
   })
 })

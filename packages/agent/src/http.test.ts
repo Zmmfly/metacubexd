@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createControlRouter } from './http'
 import { ProfileEditorConflictError } from './profile-editor'
 import { SubscriptionFetchError } from './profiles'
+import { createAgentSettings } from './settings'
 import { TunPreconditionError } from './tun'
 
 function fakeState(over: Partial<KernelState> = {}): KernelState {
@@ -106,7 +107,18 @@ function makeDeps(token?: string) {
   }))
   const homeDir = mkdtempSync(join(tmpdir(), 'mcxd-http-'))
   const activeConfigPath = join(homeDir, 'active.yaml')
-  return { supervisor, profiles, info, homeDir, activeConfigPath, token }
+  // Real (file-backed) settings store: the /settings + config/section tests
+  // exercise the actual merge/persist semantics instead of a fake.
+  const settings = createAgentSettings(join(homeDir, 'settings.json'))
+  return {
+    supervisor,
+    profiles,
+    info,
+    homeDir,
+    activeConfigPath,
+    token,
+    settings,
+  }
 }
 
 async function mount(deps: ReturnType<typeof makeDeps>) {
@@ -1373,6 +1385,62 @@ describe('createControlRouter — config sections', () => {
     expect(deps.profiles.setActive).toHaveBeenCalledWith('p1')
   })
 
+  it('pUT /api/control/config/section mirrors a whitelisted key into settings overrides', async () => {
+    const deps = makeDeps()
+    deps.profiles.getActiveId = vi.fn(async () => 'p1')
+    srv = await mount(deps)
+    const res = await fetch(`${srv.base}/api/control/config/section`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key: 'allow-lan', value: true, restart: false }),
+    })
+    expect(res.status).toBe(200)
+    // Written to the profile AND to the instance-level bag, so it survives a
+    // subscription refresh that rewrites the profile file.
+    expect(deps.profiles.setSection).toHaveBeenCalledWith(
+      'p1',
+      'allow-lan',
+      true,
+    )
+    expect((await deps.settings.read()).configOverrides).toEqual({
+      'allow-lan': true,
+    })
+  })
+
+  it('pUT /api/control/config/section with a null whitelisted value deletes the override', async () => {
+    const deps = makeDeps()
+    deps.profiles.getActiveId = vi.fn(async () => 'p1')
+    await deps.settings.update({
+      configOverrides: { 'allow-lan': true, mode: 'rule' },
+    })
+    srv = await mount(deps)
+    const res = await fetch(`${srv.base}/api/control/config/section`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key: 'allow-lan', value: null }),
+    })
+    expect(res.status).toBe(200)
+    expect((await deps.settings.read()).configOverrides).toEqual({
+      mode: 'rule',
+    })
+  })
+
+  it('pUT /api/control/config/section leaves settings alone for a non-whitelisted key', async () => {
+    const deps = makeDeps()
+    deps.profiles.getActiveId = vi.fn(async () => 'p1')
+    srv = await mount(deps)
+    const res = await fetch(`${srv.base}/api/control/config/section`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key: 'rules', value: ['MATCH,REJECT'] }),
+    })
+    expect(res.status).toBe(200)
+    expect(deps.profiles.setSection).toHaveBeenCalledWith('p1', 'rules', [
+      'MATCH,REJECT',
+    ])
+    expect((await deps.settings.read()).configOverrides).toEqual({})
+  })
+
   it('pUT /api/control/config/section returns 409 when there is no active profile', async () => {
     const deps = makeDeps()
     deps.profiles.getActiveId = vi.fn(async () => undefined)
@@ -1386,5 +1454,143 @@ describe('createControlRouter — config sections', () => {
     expect(await res.json()).toEqual({ error: 'no active profile' })
     expect(deps.profiles.setSection).not.toHaveBeenCalled()
     expect(deps.supervisor.restart).not.toHaveBeenCalled()
+    expect((await deps.settings.read()).configOverrides).toEqual({})
+  })
+})
+
+describe('createControlRouter — agent settings', () => {
+  let srv: Awaited<ReturnType<typeof mount>>
+  afterEach(async () => srv?.close())
+
+  async function putSettings(
+    base: string,
+    body: Record<string, unknown>,
+  ): Promise<Response> {
+    return fetch(`${base}/api/control/settings`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  }
+
+  it('gET /api/control/settings returns the stored bag', async () => {
+    const deps = makeDeps()
+    await deps.settings.update({
+      configOverrides: { 'allow-lan': true },
+    })
+    srv = await mount(deps)
+    const res = await fetch(`${srv.base}/api/control/settings`)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({
+      geoIdleTimeoutMs: 60_000,
+      configOverrides: { 'allow-lan': true },
+    })
+  })
+
+  it('pUT /api/control/settings shallow-merges configOverrides (siblings survive)', async () => {
+    const deps = makeDeps()
+    await deps.settings.update({
+      configOverrides: { 'allow-lan': true, mode: 'rule' },
+    })
+    srv = await mount(deps)
+    const res = await putSettings(srv.base, {
+      configOverrides: { mode: 'global' },
+    })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({
+      geoIdleTimeoutMs: 60_000,
+      configOverrides: { 'allow-lan': true, mode: 'global' },
+    })
+    expect((await deps.settings.read()).configOverrides).toEqual({
+      'allow-lan': true,
+      mode: 'global',
+    })
+  })
+
+  it('pUT /api/control/settings deletes the keys listed in configOverrideKeys', async () => {
+    const deps = makeDeps()
+    await deps.settings.update({
+      configOverrides: { 'allow-lan': true, mode: 'rule' },
+    })
+    srv = await mount(deps)
+    const res = await putSettings(srv.base, {
+      configOverrideKeys: ['allow-lan'],
+    })
+    expect(res.status).toBe(200)
+    expect((await deps.settings.read()).configOverrides).toEqual({
+      mode: 'rule',
+    })
+  })
+
+  it('pUT /api/control/settings applies the merge and the deletes in one call (delete wins)', async () => {
+    const deps = makeDeps()
+    await deps.settings.update({
+      configOverrides: { ipv6: false },
+    })
+    srv = await mount(deps)
+    const res = await putSettings(srv.base, {
+      configOverrides: { 'allow-lan': true, ipv6: true },
+      configOverrideKeys: ['allow-lan'],
+    })
+    expect(res.status).toBe(200)
+    expect((await deps.settings.read()).configOverrides).toEqual({
+      ipv6: true,
+    })
+  })
+
+  it('pUT /api/control/settings keeps geoIdleTimeoutMs untouched when only overrides change', async () => {
+    const deps = makeDeps()
+    await deps.settings.update({ geoIdleTimeoutMs: 5_000 })
+    srv = await mount(deps)
+    const res = await putSettings(srv.base, {
+      configOverrides: { mode: 'rule' },
+    })
+    expect(res.status).toBe(200)
+    expect(await deps.settings.read()).toEqual({
+      geoIdleTimeoutMs: 5_000,
+      configOverrides: { mode: 'rule' },
+    })
+  })
+
+  it('pUT /api/control/settings rejects non-scalar override values with 400', async () => {
+    const deps = makeDeps()
+    srv = await mount(deps)
+    for (const value of [{ dns: { fake: true } }, ['a'], null]) {
+      const res = await putSettings(srv.base, {
+        configOverrides: { 'allow-lan': value },
+      })
+      expect(res.status).toBe(400)
+    }
+    expect((await deps.settings.read()).configOverrides).toEqual({})
+  })
+
+  it('pUT /api/control/settings rejects a non-object bag and non-string keys with 400', async () => {
+    const deps = makeDeps()
+    srv = await mount(deps)
+    expect(
+      (await putSettings(srv.base, { configOverrides: 'nope' })).status,
+    ).toBe(400)
+    expect(
+      (await putSettings(srv.base, { configOverrideKeys: [1] })).status,
+    ).toBe(400)
+    expect(
+      (await putSettings(srv.base, { configOverrideKeys: 'allow-lan' })).status,
+    ).toBe(400)
+    expect((await deps.settings.read()).configOverrides).toEqual({})
+  })
+
+  it('pUT /api/control/settings still validates geoIdleTimeoutMs', async () => {
+    const deps = makeDeps()
+    srv = await mount(deps)
+    const res = await putSettings(srv.base, { geoIdleTimeoutMs: 10 })
+    expect(res.status).toBe(400)
+    expect((await deps.settings.read()).geoIdleTimeoutMs).toBe(60_000)
+  })
+
+  it('404s the settings routes when no settings store is wired', async () => {
+    const { settings: _settings, ...withoutSettings } = makeDeps()
+    srv = await mount(withoutSettings as never)
+    expect((await fetch(`${srv.base}/api/control/settings`)).status).toBe(404)
+    expect((await putSettings(srv.base, {})).status).toBe(404)
   })
 })

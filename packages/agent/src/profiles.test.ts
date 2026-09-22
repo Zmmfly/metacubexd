@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
 import { createProfileStore, SubscriptionFetchError } from './profiles'
+import { createAgentSettings, fillMissingConfigOverrides } from './settings'
 
 function tmpDir() {
   return mkdtempSync(join(tmpdir(), 'mcxd-profiles-'))
@@ -159,6 +160,104 @@ describe('createProfileStore — import + active', () => {
     const meta = await store.importFromUrl('https://sub.example/clash')
     expect(meta.subscriptionInfo).toBeUndefined()
     expect(meta.name).toBe('https://sub.example/clash')
+  })
+
+  it('importFromUrl reports the whitelisted scalars to onImportOverrides', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mcxd-profiles-ovr-'))
+    const fakeFetch = (async () =>
+      new Response(
+        [
+          'allow-lan: true',
+          'mode: rule',
+          'log-level: warning',
+          'port: 7890',
+          'sniffer:',
+          '  mode: rules',
+          'proxies: []',
+          '',
+        ].join('\n'),
+        { status: 200 },
+      )) as unknown as typeof fetch
+    const seen: Record<string, unknown>[] = []
+    const store = createProfileStore({
+      dir,
+      activeConfigPath: join(dir, '..', 'active.yaml'),
+      fetch: fakeFetch,
+      idGen: () => 'id1',
+      onImportOverrides: (values) => {
+        seen.push(values)
+      },
+    })
+    await store.importFromUrl('https://sub.example/clash')
+    // Only the whitelist (top-level scalars); port/sniffer stay profile-only.
+    expect(seen).toEqual([
+      { 'allow-lan': true, mode: 'rule', 'log-level': 'warning' },
+    ])
+  })
+
+  it('importFromUrl skips onImportOverrides when no whitelisted key is present', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mcxd-profiles-ovr2-'))
+    const fakeFetch = (async () =>
+      new Response('proxies: []\n', {
+        status: 200,
+      })) as unknown as typeof fetch
+    let calls = 0
+    const store = createProfileStore({
+      dir,
+      activeConfigPath: join(dir, '..', 'active.yaml'),
+      fetch: fakeFetch,
+      idGen: () => 'id1',
+      onImportOverrides: () => {
+        calls++
+      },
+    })
+    await store.importFromUrl('https://sub.example/clash')
+    expect(calls).toBe(0)
+  })
+
+  it('importFromUrl leaves an existing override alone (only missing keys are seeded)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mcxd-profiles-ovr3-'))
+    const settings = createAgentSettings(join(dir, 'settings.json'))
+    // The user already flipped allow-lan in the panel: a re-import must keep it.
+    await settings.update({ configOverrides: { 'allow-lan': false } })
+    const fakeFetch = (async () =>
+      new Response('allow-lan: true\nmode: rule\n', {
+        status: 200,
+      })) as unknown as typeof fetch
+    const store = createProfileStore({
+      dir,
+      activeConfigPath: join(dir, '..', 'active.yaml'),
+      fetch: fakeFetch,
+      idGen: () => 'id1',
+      onImportOverrides: async (values) => {
+        await fillMissingConfigOverrides(settings, values)
+      },
+    })
+    await store.importFromUrl('https://sub.example/clash')
+    expect((await settings.read()).configOverrides).toEqual({
+      'allow-lan': false,
+      mode: 'rule',
+    })
+  })
+
+  it('importFromUrl still succeeds when the override hook fails', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mcxd-profiles-ovr4-'))
+    const fakeFetch = (async () =>
+      new Response('allow-lan: true\n', {
+        status: 200,
+      })) as unknown as typeof fetch
+    const store = createProfileStore({
+      dir,
+      activeConfigPath: join(dir, '..', 'active.yaml'),
+      fetch: fakeFetch,
+      idGen: () => 'id1',
+      onImportOverrides: () => {
+        throw new Error('settings disk full')
+      },
+    })
+    const meta = await store.importFromUrl('https://sub.example/clash')
+    expect(meta.id).toBe('id1')
+    expect(await store.read('id1')).toBe('allow-lan: true\n')
   })
 
   it('importFromUrl preserves a non-200 provider status without exposing its URL', async () => {

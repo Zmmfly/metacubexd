@@ -239,6 +239,28 @@ export function useUpdateRuleProviderMutation() {
 
 // ============== Config ==============
 
+// Top-level config keys whose persistence lives in the AGENT-LEVEL settings bag
+// (settings.configOverrides) instead of a profile section. The supervisor
+// injects these overrides into active.yaml at spawn, so they outlive profile
+// switches/refreshes. MUST stay in sync with the agent-side whitelist: PUT
+// /api/control/config/section mirrors exactly these keys into
+// settings.configOverrides. Everything else (dns, tun, ports, ...) keeps the
+// legacy profile-section write.
+export const CONFIG_OVERRIDE_KEYS = [
+  'allow-lan',
+  'mode',
+  'log-level',
+  'unified-delay',
+  'interface-name',
+  'ipv6',
+  'geodata-mode',
+  'tcp-concurrent',
+] as const
+
+export function isConfigOverrideKey(key: string): boolean {
+  return (CONFIG_OVERRIDE_KEYS as readonly string[]).includes(key)
+}
+
 export function useConfigQuery() {
   return useQuery({
     queryKey: useEndpointScopedKey(queryKeys.config),
@@ -251,11 +273,12 @@ export function useConfigQuery() {
 
 // Apply a single top-level config change. The PATCH hot-applies it to the
 // running kernel; when `persist` is supplied (server/desktop with the
-// config-sections capability) the SAME change is written back to the active
-// profile so it survives a kernel restart (#2070). Persisting is best-effort:
-// the live PATCH already took effect, so a persistence hiccup must not fail the
-// save the user just saw succeed — it only means the change won't outlast a
-// restart, which is the pre-fix behaviour.
+// config-sections capability) the SAME change is also persisted so it survives
+// a kernel restart (#2070) — either into the agent settings bag (whitelisted
+// keys, see CONFIG_OVERRIDE_KEYS) or into the active profile (everything else).
+// Persisting is best-effort: the live PATCH already took effect, so a
+// persistence hiccup must not fail the save the user just saw succeed — it only
+// means the change won't outlast a restart, which is the pre-fix behaviour.
 // ponytail: warn-on-failure; promote to a toast if users actually hit it.
 export async function applyConfigPatch(
   key: keyof Config,
@@ -274,6 +297,37 @@ export async function applyConfigPatch(
       '[config] failed to persist config change to the active profile:',
       e,
     )
+  }
+}
+
+// Build the persist callback for a config save. Whitelisted keys are written to
+// the agent-level settings bag (configOverrides) so the value survives profile
+// switches/refreshes; null/undefined DELETES the override via
+// configOverrideKeys. Non-whitelisted keys keep the legacy
+// config/section profile write (#2070).
+export function createConfigPersist(deps: {
+  updateSettings: (patch: {
+    configOverrides?: Record<string, unknown>
+    configOverrideKeys?: string[]
+  }) => Promise<unknown>
+  setConfigSection: (body: {
+    key: string
+    value: unknown
+    restart?: boolean
+  }) => Promise<unknown>
+}) {
+  return async ({ key, value }: { key: string; value: unknown }) => {
+    if (isConfigOverrideKey(key)) {
+      // null/undefined means "remove the override" — writing it as a value
+      // would inject a literal null into active.yaml.
+      if (value === null || value === undefined) {
+        await deps.updateSettings({ configOverrideKeys: [key] })
+      } else {
+        await deps.updateSettings({ configOverrides: { [key]: value } })
+      }
+      return
+    }
+    await deps.setConfigSection({ key, value, restart: false })
   }
 }
 
@@ -296,8 +350,13 @@ export function useUpdateConfigMutation() {
         },
         // Evaluated per-save (NOT at setup): the /info probe is async, so a
         // setup-time read could miss the agent and skip persistence forever.
+        // Whitelisted keys persist to settings.configOverrides instead of the
+        // active profile — see CONFIG_OVERRIDE_KEYS.
         persist: hasFeature('config-sections')
-          ? (body) => controlApi.setConfigSection({ ...body, restart: false })
+          ? createConfigPersist({
+              updateSettings: (patch) => controlApi.updateSettings(patch),
+              setConfigSection: (body) => controlApi.setConfigSection(body),
+            })
           : undefined,
       }),
     onSuccess: () => {

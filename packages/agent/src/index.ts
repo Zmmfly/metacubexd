@@ -14,7 +14,7 @@ import { createProxiedFetch } from './proxy-fetch'
 import { applyActiveRefresh } from './refresh-apply'
 import { createProfileScheduler } from './scheduler'
 import { createScriptRunner } from './script'
-import { createAgentSettings } from './settings'
+import { createAgentSettings, fillMissingConfigOverrides } from './settings'
 import { createSupervisor } from './supervisor'
 
 export const AGENT_VERSION = '0.0.0'
@@ -52,8 +52,17 @@ export type {
   ScriptRun,
   ScriptRunner,
 } from './script'
-export { createAgentSettings, DEFAULT_AGENT_SETTINGS } from './settings'
-export type { AgentSettings, AgentSettingsStore } from './settings'
+export {
+  CONFIG_OVERRIDE_KEYS,
+  createAgentSettings,
+  DEFAULT_AGENT_SETTINGS,
+} from './settings'
+export type {
+  AgentSettings,
+  AgentSettingsStore,
+  ConfigOverrides,
+  ConfigOverrideValue,
+} from './settings'
 export { createSupervisor } from './supervisor'
 export type { CreateSupervisorOptions, SupervisorDeps } from './supervisor'
 export { buildTunConfig, TunPreconditionError } from './tun'
@@ -88,6 +97,10 @@ export function createAgent(opts: CreateAgentOptions) {
   const proxyFetch = opts.mixedPort
     ? createProxiedFetch(`http://127.0.0.1:${opts.mixedPort}`)
     : undefined
+  // Agent-level settings (server-wide, profile-independent). Built before the
+  // profile store so the import hook below can seed instance-level config
+  // overrides, and reused for the control router (one store per agent).
+  const settings = createAgentSettings(join(opts.homeDir, 'settings.json'))
   const profiles = createProfileStore({
     dir: opts.profilesDir,
     activeConfigPath: opts.activeConfigPath,
@@ -96,8 +109,24 @@ export function createAgent(opts: CreateAgentOptions) {
     // the user's script transforms never apply. Default to a real one so the
     // feature works across every Runtime Form (server/desktop) out of the box.
     scriptRunner: opts.scriptRunner ?? createScriptRunner(),
+    // A freshly imported subscription may already carry the panel-editable
+    // switches (allow-lan, mode, …). Seed them as instance-level overrides so
+    // the first refresh — which overwrites the profile file verbatim — does not
+    // revert them. Keys that already have an override (a user's panel edit) win.
+    onImportOverrides: async (values) => {
+      await fillMissingConfigOverrides(settings, values)
+    },
   })
-  const supervisor = createSupervisor(opts)
+  const supervisor = createSupervisor({
+    ...opts,
+    // Fall back to the settings-backed override bag: the supervisor injects
+    // these into active.yaml at spawn, so the panel-editable switches outlive a
+    // subscription refresh. An explicit caller-supplied source stays
+    // authoritative (tests / embedders).
+    configOverrides:
+      opts.configOverrides ??
+      (() => settings.read().then((s) => s.configOverrides)),
+  })
   const profileEditor = createProfileConfigEditor({
     profiles,
     supervisor,
@@ -147,7 +176,7 @@ export function createAgent(opts: CreateAgentOptions) {
     kernelManager,
     tunController,
     geoProxyFetch: proxyFetch,
-    settings: createAgentSettings(join(opts.homeDir, 'settings.json')),
+    settings,
   })
   // Wire the auto-update scheduler to the same profiles store. NOT started here
   // — the server boot plugin starts it (the desktop builds its own scheduler so
