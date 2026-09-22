@@ -125,9 +125,15 @@ onMounted(() => {
           </Button>
           <details class="dropdown dropdown-end">
             <summary
-              class="btn flex h-8 min-h-8 w-6 cursor-pointer items-center justify-center rounded-none rounded-r-lg border-0 bg-secondary p-0 text-secondary-content"
+              class="btn flex h-8 min-h-8 w-6 items-center justify-center rounded-none rounded-r-lg border-0 bg-secondary p-0 text-secondary-content"
+              :class="[
+                updating
+                  ? 'btn-disabled cursor-wait !bg-base-content/10'
+                  : 'cursor-pointer',
+              ]"
               :title="t('profilesRefreshOptions')"
-              @click.stop
+              :aria-disabled="updating"
+              @click.stop="updating ? $event.preventDefault() : undefined"
             >
               <IconChevronDown :size="14" />
             </summary>

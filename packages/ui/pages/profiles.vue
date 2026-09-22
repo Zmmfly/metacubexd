@@ -526,9 +526,19 @@ const onCopyShareUrl = async () => {
               </Button>
               <details class="dropdown dropdown-end">
                 <summary
-                  class="btn flex h-6 min-h-6 w-5 cursor-pointer items-center justify-center rounded-none rounded-r-lg border border-base-content/20 p-0"
+                  class="btn flex h-6 min-h-6 w-5 items-center justify-center rounded-none rounded-r-lg border border-base-content/20 p-0"
+                  :class="
+                    isBusy(`refresh:${p.id}`)
+                      ? 'btn-disabled cursor-wait !bg-base-content/10'
+                      : 'cursor-pointer'
+                  "
                   :title="t('profilesRefreshOptions')"
-                  @click.stop
+                  :aria-disabled="isBusy(`refresh:${p.id}`)"
+                  @click.stop="
+                    isBusy(`refresh:${p.id}`)
+                      ? $event.preventDefault()
+                      : undefined
+                  "
                 >
                   <IconChevronDown :size="12" />
                 </summary>
@@ -565,9 +575,19 @@ const onCopyShareUrl = async () => {
               </Button>
               <details class="dropdown dropdown-end">
                 <summary
-                  class="btn flex h-6 min-h-6 w-5 cursor-pointer items-center justify-center rounded-none rounded-r-lg border border-success/30 bg-success p-0 text-success-content"
+                  class="btn flex h-6 min-h-6 w-5 items-center justify-center rounded-none rounded-r-lg border border-success/30 bg-success p-0 text-success-content"
+                  :class="
+                    isBusy(`refresh-apply:${p.id}`)
+                      ? 'btn-disabled cursor-wait !bg-base-content/10'
+                      : 'cursor-pointer'
+                  "
                   :title="t('profilesRefreshOptions')"
-                  @click.stop
+                  :aria-disabled="isBusy(`refresh-apply:${p.id}`)"
+                  @click.stop="
+                    isBusy(`refresh-apply:${p.id}`)
+                      ? $event.preventDefault()
+                      : undefined
+                  "
                 >
                   <IconChevronDown :size="12" />
                 </summary>
