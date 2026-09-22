@@ -5,6 +5,7 @@ import type {
   SystemProxyController,
   TunController,
 } from './types'
+import { join } from 'node:path'
 import { createControlRouter } from './http'
 import { MIHOMO_VERSION } from './kernel/assets'
 import { createProfileConfigEditor } from './profile-editor'
@@ -13,6 +14,7 @@ import { createProxiedFetch } from './proxy-fetch'
 import { applyActiveRefresh } from './refresh-apply'
 import { createProfileScheduler } from './scheduler'
 import { createScriptRunner } from './script'
+import { createAgentSettings } from './settings'
 import { createSupervisor } from './supervisor'
 
 export const AGENT_VERSION = '0.0.0'
@@ -50,6 +52,8 @@ export type {
   ScriptRun,
   ScriptRunner,
 } from './script'
+export { createAgentSettings, DEFAULT_AGENT_SETTINGS } from './settings'
+export type { AgentSettings, AgentSettingsStore } from './settings'
 export { createSupervisor } from './supervisor'
 export type { CreateSupervisorOptions, SupervisorDeps } from './supervisor'
 export { buildTunConfig, TunPreconditionError } from './tun'
@@ -143,6 +147,7 @@ export function createAgent(opts: CreateAgentOptions) {
     kernelManager,
     tunController,
     geoProxyFetch: proxyFetch,
+    settings: createAgentSettings(join(opts.homeDir, 'settings.json')),
   })
   // Wire the auto-update scheduler to the same profiles store. NOT started here
   // — the server boot plugin starts it (the desktop builds its own scheduler so

@@ -68,4 +68,63 @@ describe('fetchGeoAssets', () => {
     )
     expect(GEO_ASSET_URLS['country.mmdb'].endsWith('/country.mmdb')).toBe(true)
   })
+
+  it('idle watchdog: a slow-but-progressing download runs to completion', async () => {
+    const dest = tmp()
+    // 4 chunks 100ms apart (< 150ms budget) => total ~300ms > budget: proves the
+    // timer re-arms per chunk instead of bounding the whole transfer.
+    const fakeFetch = vi.fn(
+      async () =>
+        new Response(
+          new ReadableStream({
+            async pull(controller) {
+              const chunks = [
+                new Uint8Array([1]),
+                new Uint8Array([2]),
+                new Uint8Array([3]),
+                new Uint8Array([4]),
+              ]
+              for (const chunk of chunks) {
+                await new Promise((resolve) => setTimeout(resolve, 100))
+                controller.enqueue(chunk)
+              }
+              controller.close()
+            },
+          }),
+          { status: 200 },
+        ),
+    )
+    const { files } = await fetchGeoAssets(dest, {
+      fetch: fakeFetch as unknown as typeof fetch,
+      idleTimeoutMs: 150,
+    })
+    expect(files).toHaveLength(3)
+    expect(readFileSync(join(dest, 'geoip.dat'))).toHaveLength(4)
+  }, 10_000)
+
+  it('idle watchdog: a stalled transfer aborts with a clear error', async () => {
+    const dest = tmp()
+    // One chunk immediately, then silence — the 100ms idle budget must fire.
+    const fakeFetch = vi.fn(
+      async () =>
+        new Response(
+          new ReadableStream({
+            async pull(controller) {
+              controller.enqueue(new Uint8Array([1]))
+              await new Promise((resolve) => setTimeout(resolve, 5_000))
+              controller.enqueue(new Uint8Array([2]))
+              controller.close()
+            },
+          }),
+          { status: 200 },
+        ),
+    )
+    const error = await fetchGeoAssets(dest, {
+      fetch: fakeFetch as unknown as typeof fetch,
+      idleTimeoutMs: 100,
+    }).catch((reason: unknown) => reason)
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toContain('no data for 100ms')
+    expect((error as Error).message).toContain('geoip.dat')
+  }, 10_000)
 })

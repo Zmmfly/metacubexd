@@ -260,6 +260,7 @@ describe('composables/useControlApi methods', () => {
     await useControlApi().updateGeoAssets()
     expect(post).toHaveBeenCalledWith('geo/update', {
       json: { useProxy: undefined },
+      timeout: 600_000,
     })
   })
 

@@ -1,6 +1,7 @@
 import type { ConfigPatchV1 } from '@metacubexd/config-editor'
 import type { App, H3Event } from 'h3'
 import type { ProfileConfigEditor } from './profile-editor'
+import type { AgentSettingsStore } from './settings'
 import type {
   KernelLogLine,
   KernelManager,
@@ -78,6 +79,9 @@ export interface ControlRouterDeps {
   // Fetch through the kernel's local proxy (mixed port) for geo asset
   // downloads; absent => 'useProxy' geo updates fall back to the direct fetch.
   geoProxyFetch?: typeof fetch
+  // Generic agent settings store (geo idle timeout today, extensible).
+  // Absent => /settings 404s and geo/update uses the hardcoded default.
+  settings?: AgentSettingsStore
   createWebdavClient?: typeof defaultCreateWebdavClient // override for tests
   readFile?: typeof defaultReadFile // override for tests; defaults to fs/promises readFile
 }
@@ -100,6 +104,7 @@ export function createControlRouter(deps: ControlRouterDeps): App {
     tunController,
     geoFetch,
     geoProxyFetch,
+    settings,
     createWebdavClient = defaultCreateWebdavClient,
     readFile = defaultReadFile,
   } = deps
@@ -551,6 +556,36 @@ export function createControlRouter(deps: ControlRouterDeps): App {
     }),
   )
 
+  // ---- Agent settings (generic bag; geo idle timeout is the first key) ----
+  router.get(
+    `${PREFIX}/settings`,
+    defineEventHandler(async () => {
+      if (!settings) throw createError({ statusCode: 404 })
+      return settings.read()
+    }),
+  )
+  router.put(
+    `${PREFIX}/settings`,
+    defineEventHandler(async (event) => {
+      if (!settings) throw createError({ statusCode: 404 })
+      const body = (await readBody(event)) as {
+        geoIdleTimeoutMs?: number
+      }
+      if (
+        body.geoIdleTimeoutMs !== undefined &&
+        (!Number.isFinite(body.geoIdleTimeoutMs) ||
+          body.geoIdleTimeoutMs < 1_000 ||
+          body.geoIdleTimeoutMs > 3_600_000)
+      ) {
+        throw createError({
+          statusCode: 400,
+          statusMessage: 'geoIdleTimeoutMs must be 1000..3600000',
+        })
+      }
+      return settings.update(body)
+    }),
+  )
+
   // ---- Geo assets (always available — backed by homeDir + fetch) ----
   router.post(
     `${PREFIX}/geo/update`,
@@ -559,7 +594,13 @@ export function createControlRouter(deps: ControlRouterDeps): App {
         useProxy?: boolean
       }
       const netFetch = body?.useProxy ? (geoProxyFetch ?? geoFetch) : geoFetch
-      const { files } = await fetchGeoAssets(homeDir, { fetch: netFetch })
+      const { geoIdleTimeoutMs } = settings
+        ? await settings.read()
+        : { geoIdleTimeoutMs: 60_000 }
+      const { files } = await fetchGeoAssets(homeDir, {
+        fetch: netFetch,
+        idleTimeoutMs: geoIdleTimeoutMs,
+      })
       return { ok: true, files }
     }),
   )

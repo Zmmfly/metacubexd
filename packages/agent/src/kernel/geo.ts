@@ -24,6 +24,62 @@ const GEO_FILES = Object.keys(GEO_ASSET_URLS) as GeoAssetFile[]
 
 export interface FetchGeoAssetsDeps {
   fetch?: typeof fetch
+  // Per-file idle timeout (ms): the transfer aborts when NO bytes arrive for
+  // this long. A slow but progressing download resets the timer on every
+  // chunk and always runs to completion — this is what makes weak networks
+  // workable. Default 60s. 0/undefined disables the idle watchdog.
+  idleTimeoutMs?: number
+  // Injectable timer handles for tests.
+  setTimer?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>
+  clearTimer?: (handle: ReturnType<typeof setTimeout>) => void
+}
+
+/**
+ * Read a response body to a Buffer while enforcing an idle watchdog: the
+ * timer is re-armed on EVERY received chunk, so only a genuinely stalled
+ * transfer (connected but silent) times out — never a slow one.
+ */
+async function readBodyWithIdleTimeout(
+  res: Response,
+  file: string,
+  idleTimeoutMs: number,
+  setTimer: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>,
+  clearTimer: (handle: ReturnType<typeof setTimeout>) => void,
+): Promise<Buffer> {
+  if (!res.body) {
+    // No stream (e.g. a test double) — fall back to the buffered read.
+    return Buffer.from(await res.arrayBuffer())
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let onIdle: (() => void) | undefined
+  const idle = new Promise<never>((_, reject) => {
+    onIdle = () =>
+      reject(
+        new Error(
+          `fetchGeoAssets: no data for ${idleTimeoutMs}ms while downloading ${file}`,
+        ),
+      )
+  })
+  const arm = () => {
+    if (timer !== undefined) clearTimer(timer)
+    timer = setTimer(() => onIdle?.(), idleTimeoutMs)
+  }
+  try {
+    arm()
+    const chunks: Uint8Array[] = []
+    const reading = (async () => {
+      for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+        chunks.push(chunk)
+        arm()
+      }
+    })()
+    await Promise.race([reading, idle])
+    return Buffer.concat(chunks)
+  } finally {
+    if (timer !== undefined) clearTimer(timer)
+    // Abort the stream on idle timeout so the socket is released promptly.
+    await res.body.cancel().catch(() => {})
+  }
 }
 
 /**
@@ -37,6 +93,9 @@ export async function fetchGeoAssets(
   deps: FetchGeoAssetsDeps = {},
 ): Promise<{ files: string[] }> {
   const doFetch = deps.fetch ?? fetch
+  const idleTimeoutMs = deps.idleTimeoutMs ?? 60_000
+  const setTimer = deps.setTimer ?? ((fn, ms) => setTimeout(fn, ms))
+  const clearTimer = deps.clearTimer ?? ((h) => clearTimeout(h))
   await mkdir(destDir, { recursive: true })
 
   const files: string[] = []
@@ -48,7 +107,15 @@ export async function fetchGeoAssets(
         `fetchGeoAssets: download failed ${res.status} for ${file} (${url})`,
       )
     }
-    const bytes = Buffer.from(await res.arrayBuffer())
+    const bytes = idleTimeoutMs
+      ? await readBodyWithIdleTimeout(
+          res,
+          file,
+          idleTimeoutMs,
+          setTimer,
+          clearTimer,
+        )
+      : Buffer.from(await res.arrayBuffer())
     await writeFile(join(destDir, file), bytes)
     files.push(file)
   }

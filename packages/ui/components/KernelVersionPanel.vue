@@ -21,6 +21,7 @@ const {
   switching,
 } = kernelVersions
 const { available: geoAvailable, updating } = geo
+const { idleTimeoutSec, settingsLoaded, settingsSaving } = geo
 
 // The whole card renders when at least one of its capabilities is present.
 const cardVisible = computed(
@@ -40,8 +41,8 @@ const onGeoUpdateViaProxy = (event: Event) => {
 }
 
 onMounted(() => {
-  if (!versionsAvailable.value) return
-  kernelVersions.load()
+  if (versionsAvailable.value) kernelVersions.load()
+  if (geoAvailable.value) void geo.loadSettings()
 })
 </script>
 
@@ -145,6 +146,30 @@ onMounted(() => {
       <p class="mt-2 text-sm text-base-content/60">
         {{ t('geoAssetsDescription') }}
       </p>
+
+      <!-- Per-file idle timeout for geo downloads (server-side setting): the
+           transfer aborts only after this long with NO bytes arriving, so a
+           slow-but-progressing weak-network download always completes. -->
+      <label
+        v-if="settingsLoaded"
+        class="mt-2 flex w-fit items-center gap-2 text-sm"
+      >
+        <span class="text-base-content/60">
+          {{ t('geoIdleTimeout') }}
+        </span>
+        <input
+          v-model.number="idleTimeoutSec"
+          type="number"
+          min="1"
+          max="3600"
+          class="input-bordered input w-20 input-xs"
+          :disabled="settingsSaving"
+          @change="geo.saveIdleTimeout"
+        />
+        <span class="text-xs text-base-content/50">
+          {{ t('geoIdleTimeoutUnit') }}
+        </span>
+      </label>
     </template>
   </div>
 </template>

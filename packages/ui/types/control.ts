@@ -143,6 +143,13 @@ export interface GeoUpdateResult {
   files: string[]
 }
 
+// GET/PUT /api/control/settings — generic agent-level settings bag (server
+// side, profile-independent). geoIdleTimeoutMs is the per-file idle watchdog
+// for geo asset downloads (SHARED CONTRACTS).
+export interface AgentSettings {
+  geoIdleTimeoutMs: number
+}
+
 // WebDAV backup/restore (capability-gated 'webdav-backup'). Credentials are
 // sent per-request — the agent never persists them (SHARED CONTRACTS).
 export interface WebdavCredentials {

@@ -1,5 +1,6 @@
 import type { ConfigPatchV1 } from '@metacubexd/config-editor'
 import type {
+  AgentSettings,
   ControlInfo,
   GeoUpdateResult,
   KernelState,
@@ -26,6 +27,10 @@ const PROFILE_SUBSCRIPTION_TIMEOUT = 45_000
 const PROFILE_VALIDATE_TIMEOUT = 330_000
 const PROFILE_ACTIVATE_TIMEOUT = 360_000
 const PROFILE_REFRESH_AND_ACTIVATE_TIMEOUT = 390_000
+// Geo downloads are idle-watched server-side (default 60s of silence per
+// file), so the request itself just needs a generous outer bound that a
+// slow-but-progressing weak-network transfer can live within.
+const GEO_UPDATE_TIMEOUT = 600_000
 
 export interface ControlConfig {
   base: string
@@ -209,7 +214,15 @@ export function useControlApi() {
     // Geo assets (capability-gated 'geo-assets'). POST downloads the geoip/
     // geosite/mmdb databases into the kernel home dir and echoes { ok, files }.
     updateGeoAssets: (useProxy?: boolean) =>
-      client.post('geo/update', { json: { useProxy } }).json<GeoUpdateResult>(),
+      client
+        .post('geo/update', {
+          json: { useProxy },
+          timeout: GEO_UPDATE_TIMEOUT,
+        })
+        .json<GeoUpdateResult>(),
+    getSettings: () => client.get('settings').json<AgentSettings>(),
+    updateSettings: (patch: Partial<AgentSettings>) =>
+      client.put('settings', { json: patch }).json<AgentSettings>(),
 
     // Runtime config viewer (capability-gated 'runtime-config'). GET returns the
     // ACTUAL config file the kernel runs with -f as text/yaml (it carries the
