@@ -21,7 +21,15 @@ import {
 } from '@tabler/icons-vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { matchSorter } from 'match-sorter'
-import { computed, ref, watch } from 'vue'
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  onUpdated,
+  ref,
+  watch,
+} from 'vue'
 import { toast } from 'vue-sonner'
 import {
   useRuleProvidersQuery,
@@ -234,9 +242,54 @@ const ruleEditor = useRuleEditor()
 const editorModalRef = ref<{
   open: () => void
   close: (force?: boolean) => void
+  contentRef: HTMLElement | null
 }>()
 const editorSaving = ref(false)
 const dragIndex = ref<number | null>(null)
+
+// The editor can hold thousands of rows — virtualize it like the read-only
+// list so opening the modal and typing stay cheap regardless of rule count.
+// The modal's own content area stays the scroll container (the scrollbar
+// keeps its usual place at the modal edge, away from the delete buttons);
+// scrollMargin accounts for the hint/diagnostics/headers above the list.
+const editorListRef = ref<HTMLElement | null>(null)
+const editorScrollMargin = ref(0)
+
+function measureEditorScrollMargin() {
+  const list = editorListRef.value
+  const scroller = editorModalRef.value?.contentRef ?? null
+  editorScrollMargin.value =
+    list && scroller
+      ? list.getBoundingClientRect().top -
+        scroller.getBoundingClientRect().top +
+        scroller.scrollTop
+      : 0
+}
+
+// Content above the list (diagnostics, wrapping hint) can change height on
+// any render — re-measure after updates and on window resize. Scrolling
+// itself does not trigger component updates, so this never runs per-frame.
+onUpdated(measureEditorScrollMargin)
+onMounted(() => window.addEventListener('resize', measureEditorScrollMargin))
+onBeforeUnmount(() =>
+  window.removeEventListener('resize', measureEditorScrollMargin),
+)
+
+const editorVirtualizerOptions = computed(() => ({
+  count: ruleEditor.rules.value.length,
+  getScrollElement: () => editorModalRef.value?.contentRef ?? null,
+  estimateSize: () => 52, // Row height (44px) + 8px gap
+  overscan: 8,
+  scrollMargin: editorScrollMargin.value,
+}))
+const editorVirtualizer = useVirtualizer(editorVirtualizerOptions)
+const virtualEditorRowsWithData = computed(() =>
+  editorVirtualizer.value.getVirtualItems().map((virtualRow) => ({
+    ...virtualRow,
+    data: ruleEditor.rules.value[virtualRow.index]!,
+  })),
+)
+const editorTotalSize = computed(() => editorVirtualizer.value.getTotalSize())
 
 async function openRuleEditor() {
   editorModalRef.value?.open()
@@ -245,6 +298,14 @@ async function openRuleEditor() {
 
 function addRuleEntry() {
   ruleEditor.add('')
+}
+
+// Top-level add: prepend at index 0 so the new row is right where the user
+// clicked (appending would land thousands of rows away, off-screen).
+async function addRuleEntryAtTop() {
+  ruleEditor.add('', 0)
+  await nextTick()
+  editorListRef.value?.querySelector('input')?.focus()
 }
 
 function updateRuleLine(index: number, value: string) {
@@ -747,81 +808,108 @@ async function openFullEditor() {
           </li>
         </ul>
 
-        <!-- Column headers -->
-        <div
-          class="grid grid-cols-[auto_minmax(0,1fr)_auto_auto_auto_auto_auto] items-center gap-2 px-1 text-xs font-medium text-base-content/50"
+        <Button
+          class="flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-primary/30 py-2 text-sm text-primary transition-colors hover:bg-primary/10"
+          @click="addRuleEntryAtTop"
         >
-          <span class="w-4" />
-          <span>{{ t('rules') }}</span>
-          <span class="w-7" />
-          <span class="w-7" />
-          <span class="w-7" />
-          <span class="w-7" />
-          <span class="w-7" />
-        </div>
+          <IconPlus :size="16" />
+          {{ t('add') }}
+        </Button>
 
-        <!-- Editable rows (draggable to reorder) -->
+        <!-- Editable rows (draggable to reorder). Virtualized against the
+             modal's own content scroller so the scrollbar stays at the modal
+             edge, same as a plain list. -->
         <div
-          v-for="(entry, index) in ruleEditor.rules.value"
-          :key="index"
-          class="grid grid-cols-[auto_minmax(0,1fr)_auto_auto_auto_auto_auto] items-center gap-2 rounded-lg border border-base-content/8 bg-base-200/50 p-1.5"
-          :class="{ 'opacity-50': dragIndex === index }"
-          draggable="true"
-          @dragstart="onRuleDragStart(index)"
-          @dragover.prevent
-          @drop="onRuleDrop(index)"
-          @dragend="dragIndex = null"
+          v-if="ruleEditor.rules.value.length"
+          ref="editorListRef"
+          :style="{
+            height: `${editorTotalSize}px`,
+            width: '100%',
+            position: 'relative',
+          }"
         >
-          <span class="cursor-grab text-base-content/40" :title="t('reorder')">
-            <IconGripVertical :size="16" />
-          </span>
-          <input
-            :value="entry"
-            class="input-bordered input min-w-0 flex-1 rounded-md font-mono text-xs input-sm"
-            :placeholder="t('routingEditorRulePlaceholder')"
-            @input="
-              updateRuleLine(index, ($event.target as HTMLInputElement).value)
-            "
-          />
-          <Button
-            class="flex h-7 w-7 items-center justify-center rounded-md text-base-content/50 transition-colors hover:bg-primary/15 hover:text-primary disabled:opacity-30"
-            :title="t('moveToTop')"
-            :disabled="index === 0"
-            @click="ruleEditor.move(index, 0)"
+          <div
+            v-for="item in virtualEditorRowsWithData"
+            :key="String(item.key)"
+            class="pb-2"
+            :style="{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: `${item.size}px`,
+              transform: `translateY(${item.start - editorScrollMargin}px)`,
+            }"
           >
-            <IconArrowBarToUp :size="16" />
-          </Button>
-          <Button
-            class="flex h-7 w-7 items-center justify-center rounded-md text-base-content/50 transition-colors hover:bg-primary/15 hover:text-primary disabled:opacity-30"
-            :title="t('moveUp')"
-            :disabled="index === 0"
-            @click="ruleEditor.move(index, index - 1)"
-          >
-            <IconChevronUp :size="16" />
-          </Button>
-          <Button
-            class="flex h-7 w-7 items-center justify-center rounded-md text-base-content/50 transition-colors hover:bg-primary/15 hover:text-primary disabled:opacity-30"
-            :title="t('moveDown')"
-            :disabled="index === ruleEditor.rules.value.length - 1"
-            @click="ruleEditor.move(index, index + 1)"
-          >
-            <IconChevronDown :size="16" />
-          </Button>
-          <Button
-            class="flex h-7 w-7 items-center justify-center rounded-md text-base-content/50 transition-colors hover:bg-primary/15 hover:text-primary disabled:opacity-30"
-            :title="t('moveToBottom')"
-            :disabled="index === ruleEditor.rules.value.length - 1"
-            @click="ruleEditor.move(index, ruleEditor.rules.value.length - 1)"
-          >
-            <IconArrowBarToDown :size="16" />
-          </Button>
-          <Button
-            class="flex h-7 w-7 items-center justify-center rounded-md text-base-content/50 transition-colors hover:bg-error/15 hover:text-error"
-            :title="t('delete')"
-            @click="ruleEditor.remove(index)"
-          >
-            <IconTrash :size="16" />
-          </Button>
+            <div
+              class="grid h-full grid-cols-[auto_minmax(0,1fr)_auto_auto_auto_auto_auto] items-center gap-2 rounded-lg border border-base-content/8 bg-base-200/50 p-1.5"
+              :class="{ 'opacity-50': dragIndex === item.index }"
+              draggable="true"
+              @dragstart="onRuleDragStart(item.index)"
+              @dragover.prevent
+              @drop="onRuleDrop(item.index)"
+              @dragend="dragIndex = null"
+            >
+              <span
+                class="cursor-grab text-base-content/40"
+                :title="t('reorder')"
+              >
+                <IconGripVertical :size="16" />
+              </span>
+              <input
+                :value="item.data"
+                class="input-bordered input min-w-0 flex-1 rounded-md font-mono text-xs input-sm"
+                :placeholder="t('routingEditorRulePlaceholder')"
+                @input="
+                  updateRuleLine(
+                    item.index,
+                    ($event.target as HTMLInputElement).value,
+                  )
+                "
+              />
+              <Button
+                class="flex h-7 w-7 items-center justify-center rounded-md text-base-content/50 transition-colors hover:bg-primary/15 hover:text-primary disabled:opacity-30"
+                :title="t('moveToTop')"
+                :disabled="item.index === 0"
+                @click="ruleEditor.move(item.index, 0)"
+              >
+                <IconArrowBarToUp :size="16" />
+              </Button>
+              <Button
+                class="flex h-7 w-7 items-center justify-center rounded-md text-base-content/50 transition-colors hover:bg-primary/15 hover:text-primary disabled:opacity-30"
+                :title="t('moveUp')"
+                :disabled="item.index === 0"
+                @click="ruleEditor.move(item.index, item.index - 1)"
+              >
+                <IconChevronUp :size="16" />
+              </Button>
+              <Button
+                class="flex h-7 w-7 items-center justify-center rounded-md text-base-content/50 transition-colors hover:bg-primary/15 hover:text-primary disabled:opacity-30"
+                :title="t('moveDown')"
+                :disabled="item.index === ruleEditor.rules.value.length - 1"
+                @click="ruleEditor.move(item.index, item.index + 1)"
+              >
+                <IconChevronDown :size="16" />
+              </Button>
+              <Button
+                class="flex h-7 w-7 items-center justify-center rounded-md text-base-content/50 transition-colors hover:bg-primary/15 hover:text-primary disabled:opacity-30"
+                :title="t('moveToBottom')"
+                :disabled="item.index === ruleEditor.rules.value.length - 1"
+                @click="
+                  ruleEditor.move(item.index, ruleEditor.rules.value.length - 1)
+                "
+              >
+                <IconArrowBarToDown :size="16" />
+              </Button>
+              <Button
+                class="flex h-7 w-7 items-center justify-center rounded-md text-base-content/50 transition-colors hover:bg-error/15 hover:text-error"
+                :title="t('delete')"
+                @click="ruleEditor.remove(item.index)"
+              >
+                <IconTrash :size="16" />
+              </Button>
+            </div>
+          </div>
         </div>
 
         <div

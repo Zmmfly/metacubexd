@@ -17,6 +17,7 @@ const emit = defineEmits<{
 }>()
 
 const dialogRef = ref<HTMLDialogElement>()
+const contentRef = ref<HTMLElement>()
 const isOpen = ref(false)
 const isRendered = ref(false)
 
@@ -77,7 +78,9 @@ const modalSizeClass = computed(() =>
   props.size === 'xl' ? 'max-w-6xl' : 'max-w-2xl',
 )
 
-defineExpose({ open, close })
+// contentRef lets scrollable slot content (e.g. a virtualized list) use the
+// modal's own content area as its scroll container instead of nesting one.
+defineExpose({ open, close, contentRef })
 </script>
 
 <template>
@@ -135,6 +138,7 @@ defineExpose({ open, close })
       <!-- Content -->
       <div
         v-if="isRendered"
+        ref="contentRef"
         class="flex-1 overflow-y-auto p-5 max-sm:pb-[max(1.25rem,env(safe-area-inset-bottom))]"
       >
         <slot />

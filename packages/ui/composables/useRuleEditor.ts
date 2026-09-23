@@ -18,6 +18,34 @@ export function useRuleEditor() {
   >('idle')
 
   const sync = () => session.replaceSections({ rules: rules.value })
+
+  // Syncing re-serializes and re-parses the whole YAML document, which is far
+  // too expensive to run on every keystroke once a profile holds thousands of
+  // rules. Batch it instead: the draft document (diagnostics/dirty) trails
+  // edits by at most SYNC_DELAY ms, while save() always flushes synchronously.
+  const SYNC_DELAY = 300
+  let syncTimer: ReturnType<typeof setTimeout> | undefined
+
+  const cancelScheduledSync = () => {
+    if (syncTimer !== undefined) {
+      clearTimeout(syncTimer)
+      syncTimer = undefined
+    }
+  }
+
+  const scheduleSync = () => {
+    cancelScheduledSync()
+    syncTimer = setTimeout(() => {
+      syncTimer = undefined
+      sync()
+    }, SYNC_DELAY)
+  }
+
+  const syncNow = () => {
+    cancelScheduledSync()
+    sync()
+  }
+
   const isValid = (line: string): boolean => {
     if (!line.trim()) return false
     const fields = splitRuleFields(line)
@@ -29,6 +57,7 @@ export function useRuleEditor() {
   }
 
   const load = async () => {
+    cancelScheduledSync()
     const result = await session.load()
     state.value = result
     if (result === 'ready' || result === 'conflict') {
@@ -47,31 +76,37 @@ export function useRuleEditor() {
     return result
   }
 
-  const add = (line = '') => {
-    rules.value = [...rules.value, line]
-    sync()
+  // All mutators edit the array in place (O(1)-ish) and schedule a batched
+  // document sync; copying the whole array per keystroke is wasteful at scale.
+  const add = (line = '', index?: number) => {
+    if (index === undefined || index >= rules.value.length) {
+      rules.value.push(line)
+    } else {
+      rules.value.splice(Math.max(0, index), 0, line)
+    }
+    scheduleSync()
   }
 
   const update = (index: number, line: string) => {
-    rules.value = rules.value.map((rule, itemIndex) =>
-      itemIndex === index ? line : rule,
-    )
-    sync()
+    if (index < 0 || index >= rules.value.length) return
+    rules.value[index] = line
+    scheduleSync()
   }
 
   const remove = (index: number) => {
-    rules.value = rules.value.filter((_, itemIndex) => itemIndex !== index)
-    sync()
+    if (index < 0 || index >= rules.value.length) return
+    rules.value.splice(index, 1)
+    scheduleSync()
   }
 
   const move = (from: number, to: number) => {
+    if (from < 0 || from >= rules.value.length) return
     if (to < 0 || to >= rules.value.length) return
-    const next = [...rules.value]
-    const [moved] = next.splice(from, 1)
+    if (from === to) return
+    const [moved] = rules.value.splice(from, 1)
     if (moved === undefined) return
-    next.splice(to, 0, moved)
-    rules.value = next
-    sync()
+    rules.value.splice(to, 0, moved)
+    scheduleSync()
   }
 
   const save = async (): Promise<boolean> => {
@@ -79,7 +114,7 @@ export function useRuleEditor() {
       toast.error(t('rulesEditorInvalid'))
       return false
     }
-    sync()
+    syncNow()
     const result = await session.save()
     if (result === 'saved' || result === 'unchanged') return true
     if (result === 'conflict') {
@@ -113,5 +148,7 @@ export function useRuleEditor() {
     remove,
     move,
     save,
+    /** Test hook: wait for the batched document sync to flush. */
+    flushSync: syncNow,
   }
 }

@@ -84,6 +84,14 @@ describe('useRuleEditor', () => {
     ])
   })
 
+  it('prepends a rule at the top when an index is given', async () => {
+    const editor = useRuleEditor()
+    await editor.load()
+    editor.add('DOMAIN,top.test,PROXY', 0)
+    expect(editor.rules.value[0]).toBe('DOMAIN,top.test,PROXY')
+    expect(editor.rules.value).toHaveLength(4)
+  })
+
   it('rejects empty fields but accepts logical rules', () => {
     const editor = useRuleEditor()
     expect(editor.isValid('')).toBe(false)
