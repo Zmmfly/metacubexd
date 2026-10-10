@@ -246,6 +246,9 @@ const editorModalRef = ref<{
 }>()
 const editorSaving = ref(false)
 const dragIndex = ref<number | null>(null)
+// HTML5 drag must not hijack text selection inside the rule inputs (see
+// onRowPointerDown).
+const dragArmedIndex = ref<number | null>(null)
 
 // The editor can hold thousands of rows — virtualize it like the read-only
 // list so opening the modal and typing stay cheap regardless of rule count.
@@ -316,11 +319,29 @@ function onRuleDragStart(index: number) {
   dragIndex.value = index
 }
 
+// Rows reorder via HTML5 drag, but a press inside a rule input must keep
+// native text selection: the browser consults `draggable` only when the drag
+// gesture starts (i.e. after mousedown + movement), so arm the row per press
+// instead of leaving it always draggable — input presses disarm it, presses
+// on the rest of the row (padding, grip, buttons) arm it.
+function onRowPointerDown(index: number, event: MouseEvent) {
+  dragArmedIndex.value = (event.target as HTMLElement).closest(
+    'input, textarea, select',
+  )
+    ? null
+    : index
+}
+
 function onRuleDrop(index: number) {
   const from = dragIndex.value
   dragIndex.value = null
   if (from === null || from === index) return
   ruleEditor.move(from, index)
+}
+
+function onRuleDragEnd() {
+  dragIndex.value = null
+  dragArmedIndex.value = null
 }
 
 async function saveRuleEditor() {
@@ -816,9 +837,10 @@ async function openFullEditor() {
           {{ t('add') }}
         </Button>
 
-        <!-- Editable rows (draggable to reorder). Virtualized against the
-             modal's own content scroller so the scrollbar stays at the modal
-             edge, same as a plain list. -->
+        <!-- Editable rows (drag to reorder; presses inside the input keep
+             native text selection — dragging arms on non-input areas).
+             Virtualized against the modal's own content scroller so the
+             scrollbar stays at the modal edge, same as a plain list. -->
         <div
           v-if="ruleEditor.rules.value.length"
           ref="editorListRef"
@@ -844,11 +866,12 @@ async function openFullEditor() {
             <div
               class="grid h-full grid-cols-[auto_minmax(0,1fr)_auto_auto_auto_auto_auto] items-center gap-2 rounded-lg border border-base-content/8 bg-base-200/50 p-1.5"
               :class="{ 'opacity-50': dragIndex === item.index }"
-              draggable="true"
+              :draggable="dragArmedIndex === item.index"
+              @mousedown="onRowPointerDown(item.index, $event)"
               @dragstart="onRuleDragStart(item.index)"
               @dragover.prevent
               @drop="onRuleDrop(item.index)"
-              @dragend="dragIndex = null"
+              @dragend="onRuleDragEnd"
             >
               <span
                 class="cursor-grab text-base-content/40"

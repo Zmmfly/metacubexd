@@ -23,7 +23,7 @@ export function useRuleEditor() {
   // too expensive to run on every keystroke once a profile holds thousands of
   // rules. Batch it instead: the draft document (diagnostics/dirty) trails
   // edits by at most SYNC_DELAY ms, while save() always flushes synchronously.
-  const SYNC_DELAY = 300
+  const SYNC_DELAY = 200
   let syncTimer: ReturnType<typeof setTimeout> | undefined
 
   const cancelScheduledSync = () => {
@@ -55,6 +55,23 @@ export function useRuleEditor() {
       fields.every((field) => field.length > 0)
     )
   }
+
+  // A freshly added row is blank until the user types. Surfacing its
+  // "Rule must be a comma-separated string" error right after the delayed
+  // sync reads as an instant error before any input happened, so diagnostics
+  // pointing at a BLANK rules entry stay hidden. Non-blank entries are still
+  // checked by the debounced sync once typing pauses, and save() rejects
+  // blanks via isValid — the check is deferred, not dropped.
+  const diagnostics = computed(() => {
+    const all = session.diagnostics.value
+    if (!all.length) return all
+    return all.filter((item) => {
+      const index = item.path[1]
+      if (item.path[0] !== 'rules' || typeof index !== 'number') return true
+      const line = rules.value[index]
+      return !(typeof line === 'string' && line.trim() === '')
+    })
+  })
 
   const load = async () => {
     cancelScheduledSync()
@@ -139,7 +156,7 @@ export function useRuleEditor() {
     loading: session.loading,
     saving: session.saving,
     dirty: session.dirty,
-    diagnostics: session.diagnostics,
+    diagnostics,
     fullEditorPath: session.fullEditorPath,
     isValid,
     load,

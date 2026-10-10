@@ -103,6 +103,34 @@ describe('useRuleEditor', () => {
     )
   })
 
+  it('hides diagnostics for blank lines but checks non-blank edits', async () => {
+    const editor = useRuleEditor()
+    await editor.load()
+    // A freshly added blank row must not raise an immediate error banner,
+    // even once the batched document sync has flushed it into the draft.
+    editor.add('')
+    editor.flushSync()
+    expect(
+      editor.diagnostics.value.filter(
+        (item) => item.path[0] === 'rules' && item.path[1] === 3,
+      ),
+    ).toEqual([])
+    // A partially typed (non-blank) line is flagged by the delayed sync.
+    editor.update(3, 'DOMAIN-SUFFIX')
+    editor.flushSync()
+    expect(
+      editor.diagnostics.value.some(
+        (item) =>
+          item.path[0] === 'rules' &&
+          item.path[1] === 3 &&
+          item.severity === 'error',
+      ),
+    ).toBe(true)
+    // Deferring the check never weakens save(): the incomplete rule blocks it.
+    await expect(editor.save()).resolves.toBe(false)
+    expect(api.applyProfileEditor).not.toHaveBeenCalled()
+  })
+
   it('saves a rules-only profile patch through one apply', async () => {
     const editor = useRuleEditor()
     await editor.load()
