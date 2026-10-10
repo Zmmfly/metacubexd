@@ -28,7 +28,7 @@ RUN pnpm --filter @metacubexd/server... build
 # ---- Stage 3: fetch the TARGET-arch mihomo kernel (normal stage = real TARGETARCH) ----
 FROM alpine:3.20 AS kernel
 ARG TARGETARCH
-ARG MIHOMO_VERSION=v1.19.27
+ARG MIHOMO_VERSION=v1.19.32
 RUN apk add --no-cache curl ca-certificates gzip
 RUN set -eux; \
     if   [ "$TARGETARCH" = "amd64" ]; then ASSET=mihomo-linux-amd64-compatible-${MIHOMO_VERSION}.gz; \
