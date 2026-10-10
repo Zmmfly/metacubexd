@@ -36,9 +36,14 @@ const needsBtnClass = computed(() => buttonClass.value.includes('btn-'))
     :disabled="disabled || loading"
     @click="$emit('click', $event)"
   >
-    <span v-if="loading" class="loading loading-sm loading-spinner" />
-    <component :is="icon" v-if="icon" />
-    <slot v-else />
+    <!-- Loading: spin the leading icon in place — width-stable, no second
+         glyph (mirrors Sidebar/proxies refresh affordances). Icon-less buttons
+         fall back to a spinner glyph before the label. -->
+    <span v-if="loading && !icon" class="loading loading-sm loading-spinner" />
+    <component :is="icon" v-if="icon" :class="{ 'animate-spin': loading }" />
+    <!-- Icon and label are independent: an `icon` must not suppress the label
+         slot (previously `v-else` here silently hid button texts). -->
+    <slot />
   </button>
 </template>
 

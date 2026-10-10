@@ -202,7 +202,7 @@ works under light and dark themes.
 
 - **Shape:** field radius (`0.5rem` / 8px, `rounded-lg` is the workhorse; pills use `rounded-full`).
 - **Primary:** `bg-primary` on `text-primary-content`, padding `0.5rem 1rem`. daisyUI `btn btn-primary` + the project's `.btn-press` layer.
-- **Hover / Focus / Active:** hover translates up 1px on `--ease-spring`; active drops to `scale(0.96)` on `--ease-press` at `--dur-instant` (the tactile press); `:focus-visible` draws a 2px `--color-primary` ring at 2px offset. Loading swaps the label for a `loading-spinner` and disables the control.
+- **Hover / Focus / Active:** hover translates up 1px on `--ease-spring`; active drops to `scale(0.96)` on `--ease-press` at `--dur-instant` (the tactile press); `:focus-visible` draws a 2px `--color-primary` ring at 2px offset. Loading spins the leading icon in place (`animate-spin`, width-stable; icon-less buttons show a `loading-spinner` before the label) and disables the control.
 - **Ghost:** transparent on `text-base-content`, same shape and press behavior — for low-emphasis and toolbar actions.
 
 ### Latency Pill (signature component)
