@@ -70,10 +70,10 @@ Dockerfile 顶部明确写了这一点：
 
 - 前两个阶段用 `--platform=$BUILDPLATFORM`，即用构建机原生架构编译；只有 `kernel` 阶段取目标架构，因此交叉构建（如 `--platform=linux/arm64`）不会卡在 QEMU 模拟上，相对快很多。
 - `kernel` 阶段按 `TARGETARCH` 下载对应二进制，当前只支持 `amd64`（`mihomo-linux-amd64-compatible-*`）与 `arm64`（`mihomo-linux-arm64-*`），其它架构会直接报 `unsupported arch` 退出。
-- 内核版本由构建参数 `MIHOMO_VERSION` 控制，Dockerfile 默认 `v1.19.27`（与 CI 一致）。需要指定其它版本时追加：
+- 内核版本由构建参数 `MIHOMO_VERSION` 控制，Dockerfile 默认 `v1.19.32`（与 CI 的 `release-server-image` 一致）。需要指定其它版本时追加：
 
 ```bash
-docker buildx build ... --build-arg MIHOMO_VERSION=v1.19.30 ... -t metacubexd-server:local --load .
+docker buildx build ... --build-arg MIHOMO_VERSION=v1.19.32 ... -t metacubexd-server:local --load .
 ```
 
 - 运行时以 `tini` 作为 PID 1，`docker-entrypoint.sh` 把 `CONTROL_PORT` 映射为 Nitro 的 `PORT` 后 `exec node /app/server/index.mjs`。
@@ -210,7 +210,7 @@ docker buildx build --progress=plain --network=host \
   -f apps/server/Dockerfile -t metacubexd-server:local --load .
 
 # 指定内核版本
-#   --build-arg MIHOMO_VERSION=v1.19.30
+#   --build-arg MIHOMO_VERSION=v1.19.32
 
 # 单架构 arm64 构建
 #   --platform=linux/arm64
