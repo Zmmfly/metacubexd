@@ -510,7 +510,7 @@
   "profilesValidationOk": "配置有效",
   "profilesEmpty": "暂无配置文件",
   "profilesMerges": "合并覆盖",
-  "profilesMergesHelp": "合并覆盖是叠加到当前激活基础配置上的 YAML 片段。启用你希望叠加的覆盖项。",
+  "profilesMergesHelp": "合并覆盖是叠加到基础配置上的 YAML 片段：全局覆盖作用于任意激活的基础配置，指定作用域的覆盖只作用于所选配置。启用你希望叠加的覆盖项。",
   "profilesNewMerge": "新建合并覆盖",
   "profilesMergeEnabled": "已启用",
   "profilesMergeNoActiveBase": "请先激活一个基础配置以应用合并覆盖。",

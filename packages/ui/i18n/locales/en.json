@@ -510,7 +510,7 @@
   "profilesValidationOk": "Configuration is valid",
   "profilesEmpty": "No profiles yet",
   "profilesMerges": "Merge overlays",
-  "profilesMergesHelp": "Merge overlays are YAML fragments composed onto the active base profile. Enable the ones you want layered on top.",
+  "profilesMergesHelp": "Merge overlays are YAML fragments composed onto base profiles: global overlays apply to any active base, scoped ones only to their chosen base. Enable the ones you want layered on top.",
   "profilesNewMerge": "New merge overlay",
   "profilesMergeEnabled": "Enabled",
   "profilesMergeNoActiveBase": "Activate a base profile to apply merge overlays.",

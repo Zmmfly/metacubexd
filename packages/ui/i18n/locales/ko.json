@@ -510,7 +510,7 @@
   "profilesValidationOk": "구성이 유효합니다",
   "profilesEmpty": "아직 프로필이 없습니다",
   "profilesMerges": "병합 오버레이",
-  "profilesMergesHelp": "병합 오버레이는 활성 베이스 프로필 위에 합성되는 YAML 조각입니다. 위에 겹치고 싶은 항목을 활성화하세요.",
+  "profilesMergesHelp": "병합 오버레이는 베이스 프로필 위에 합성되는 YAML 조각입니다. 전역 오버레이는 모든 활성 베이스 프로필에, 범위 지정 오버레이는 선택한 베이스 프로필에만 적용됩니다. 위에 겹치고 싶은 항목을 활성화하세요.",
   "profilesNewMerge": "새 병합 오버레이",
   "profilesMergeEnabled": "활성화됨",
   "profilesMergeNoActiveBase": "병합 오버레이를 적용하려면 베이스 프로필을 활성화하세요.",

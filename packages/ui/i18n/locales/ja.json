@@ -510,7 +510,7 @@
   "profilesValidationOk": "設定は有効です",
   "profilesEmpty": "プロファイルがまだありません",
   "profilesMerges": "マージオーバーレイ",
-  "profilesMergesHelp": "マージオーバーレイは、アクティブなベースプロファイルに合成される YAML フラグメントです。重ねたいものを有効にしてください。",
+  "profilesMergesHelp": "マージオーバーレイは、ベースプロファイルに合成される YAML フラグメントです。グローバルなものは任意のアクティブなベースに、スコープ指定されたものは選択したベースにのみ適用されます。重ねたいものを有効にしてください。",
   "profilesNewMerge": "新規マージオーバーレイ",
   "profilesMergeEnabled": "有効",
   "profilesMergeNoActiveBase": "マージオーバーレイを適用するにはベースプロファイルを有効化してください。",

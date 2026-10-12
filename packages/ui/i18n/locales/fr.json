@@ -510,7 +510,7 @@
   "profilesValidationOk": "La configuration est valide",
   "profilesEmpty": "Aucun profil pour le moment",
   "profilesMerges": "Superpositions de fusion",
-  "profilesMergesHelp": "Les superpositions de fusion sont des fragments YAML composés sur le profil de base actif. Activez ceux que vous souhaitez superposer.",
+  "profilesMergesHelp": "Les superpositions de fusion sont des fragments YAML composés sur les profils de base : les globales s’appliquent à tout profil de base actif, les autres uniquement au profil choisi. Activez ceux que vous souhaitez superposer.",
   "profilesNewMerge": "Nouvelle superposition de fusion",
   "profilesMergeEnabled": "Activé",
   "profilesMergeNoActiveBase": "Activez un profil de base pour appliquer les superpositions de fusion.",

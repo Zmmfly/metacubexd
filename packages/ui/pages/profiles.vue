@@ -773,65 +773,62 @@ const onSaveUrl = () => {
             </Button>
           </div>
 
-          <!-- Merge overlays: composed onto the active base when enabled. -->
+          <!-- Merge overlays: composed onto their base when enabled. The
+               creation form sits under the section header (left aligned) —
+               right-floating a multi-row form leaves a void between the
+               header and the controls on wide windows. -->
           <section class="flex flex-col gap-3">
-            <div class="flex flex-wrap items-end justify-between gap-2">
-              <div>
-                <h2 class="font-semibold text-base-content">
-                  {{ t('profilesMerges') }}
-                </h2>
-                <p class="max-w-prose text-sm text-base-content/60">
-                  {{ t('profilesMergesHelp') }}
-                </p>
-              </div>
-              <div class="flex max-w-md flex-col gap-2">
-                <div class="flex flex-wrap items-end gap-2">
-                  <label class="flex flex-col gap-1 text-sm">
-                    <span class="text-base-content/60">{{
-                      t('profilesName')
-                    }}</span>
-                    <input
-                      v-model="newMergeName"
-                      class="input-bordered input input-sm"
-                      :placeholder="t('profilesNewMerge')"
-                    />
-                  </label>
-                  <label class="flex flex-col gap-1 text-sm">
-                    <span class="text-base-content/60">{{
-                      t('profilesMergeScope')
-                    }}</span>
-                    <select
-                      v-model="newMergeScope"
-                      class="select-bordered select select-sm"
-                    >
-                      <option value="">
-                        {{ t('profilesMergeScopeGlobal') }}
-                      </option>
-                      <option
-                        v-for="b in baseProfiles"
-                        :key="b.id"
-                        :value="b.id"
-                      >
-                        {{ b.name }}
-                      </option>
-                    </select>
-                  </label>
-                  <Button
-                    class="btn-primary btn-sm"
-                    :icon="IconPlus"
-                    :loading="isBusy('createMerge')"
-                    @click="onCreateMerge"
+            <div>
+              <h2 class="font-semibold text-base-content">
+                {{ t('profilesMerges') }}
+              </h2>
+              <p class="max-w-prose text-sm text-base-content/60">
+                {{ t('profilesMergesHelp') }}
+              </p>
+            </div>
+            <div class="flex max-w-xl flex-col gap-2">
+              <div class="flex flex-wrap items-end gap-2">
+                <label class="flex flex-col gap-1 text-sm">
+                  <span class="text-base-content/60">{{
+                    t('profilesName')
+                  }}</span>
+                  <input
+                    v-model="newMergeName"
+                    class="input-bordered input input-sm"
+                    :placeholder="t('profilesNewMerge')"
+                  />
+                </label>
+                <label class="flex flex-col gap-1 text-sm">
+                  <span class="text-base-content/60">{{
+                    t('profilesMergeScope')
+                  }}</span>
+                  <select
+                    v-model="newMergeScope"
+                    class="select-bordered select select-sm"
                   >
-                    {{ t('profilesNewMerge') }}
-                  </Button>
-                </div>
-                <textarea
-                  v-model="newMergeContent"
-                  class="textarea-bordered textarea w-full font-mono textarea-sm"
-                  rows="3"
-                  :placeholder="t('profilesMergeContent')"
-                />
+                    <option value="">
+                      {{ t('profilesMergeScopeGlobal') }}
+                    </option>
+                    <option v-for="b in baseProfiles" :key="b.id" :value="b.id">
+                      {{ b.name }}
+                    </option>
+                  </select>
+                </label>
+                <Button
+                  class="btn-primary btn-sm"
+                  :icon="IconPlus"
+                  :loading="isBusy('createMerge')"
+                  @click="onCreateMerge"
+                >
+                  {{ t('profilesNewMerge') }}
+                </Button>
               </div>
+              <textarea
+                v-model="newMergeContent"
+                class="textarea-bordered textarea w-full font-mono textarea-sm"
+                rows="3"
+                :placeholder="t('profilesMergeContent')"
+              />
             </div>
 
             <div
