@@ -87,15 +87,25 @@ const editingText = ref('')
 const validationMessage = ref('')
 const validationOk = ref<boolean | null>(null)
 
-onMounted(() => {
-  if (hasFeature('profiles'))
+// The control-info probe resolves asynchronously, so a one-shot mount-time
+// `hasFeature` check loses the race on a cold entry (F5 / direct load): the
+// gate reads false, refresh() never runs, and the list stays empty until the
+// page is remounted. Watch `ready` instead (mirrors profiles/[id]/edit.vue):
+// immediate covers SPA navigation (probe already resolved), the trigger
+// covers cold loads (probe resolves after mount).
+watch(
+  ready,
+  (isReady) => {
+    if (!isReady || !hasFeature('profiles')) return
     refresh().catch((err) => {
       console.error('[profiles] initial load failed', err)
       toast.error(t('profilesActionFailed'), {
         description: controlErrorMessage(err),
       })
     })
-})
+  },
+  { immediate: true },
+)
 
 // Re-sync the active marker + list when a profile is activated from outside the
 // SPA (tray submenu, AIO scheduler). desktop-sync invalidates vue-query caches,
