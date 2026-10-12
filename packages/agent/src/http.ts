@@ -278,6 +278,26 @@ export function createControlRouter(deps: ControlRouterDeps): App {
         name: string
         content?: string
         type?: 'local' | 'merge' | 'script'
+        // Scoped merge overlays only compose onto this one base profile;
+        // omit for a legacy global overlay.
+        baseProfileId?: string
+      }
+      if (body.baseProfileId !== undefined) {
+        if (body.type !== 'merge') {
+          throw createError({
+            statusCode: 400,
+            statusMessage: 'baseProfileId is only valid for merge overlays',
+          })
+        }
+        const base = (await profiles.list()).find(
+          (m) => m.id === body.baseProfileId,
+        )
+        if (!base || base.type === 'merge' || base.type === 'script') {
+          throw createError({
+            statusCode: 400,
+            statusMessage: 'baseProfileId must reference a base profile',
+          })
+        }
       }
       return profiles.create(body)
     }),
@@ -310,10 +330,20 @@ export function createControlRouter(deps: ControlRouterDeps): App {
       }
       const meta = (await profiles.list()).find((item) => item.id === id)
       if (meta?.managedBy === 'visual-editor') {
-        throw createError({
-          statusCode: 403,
-          statusMessage: 'managed visual editor overlays are read-only',
-        })
+        // Managed overlays hold the visual editor's structured patch. Raw
+        // content/name edits are allowed at the caller's own risk — the next
+        // visual-editor apply regenerates the patch and overwrites them —
+        // but structural fields stay protected: disabling the overlay would
+        // silently nullify the visual editor's overrides.
+        const blocked = (
+          ['enabled', 'updateInterval', 'useProxy', 'url'] as const
+        ).filter((key) => body[key] !== undefined)
+        if (blocked.length) {
+          throw createError({
+            statusCode: 403,
+            statusMessage: `managed visual editor overlays do not accept: ${blocked.join(', ')}`,
+          })
+        }
       }
       return profiles.update(id, body)
     }),

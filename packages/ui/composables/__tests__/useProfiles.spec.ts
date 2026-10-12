@@ -230,6 +230,22 @@ describe('composables/useProfiles', () => {
       expect(api.listProfiles).toHaveBeenCalled()
     })
 
+    it('createMerge() forwards scope and initial YAML when given', async () => {
+      api.createProfile.mockResolvedValue(mergeMeta('m'))
+      const p = useProfiles()
+      await p.createMerge('overlay', {
+        baseProfileId: 'a',
+        content: 'prepend-rules: []\n',
+      })
+      expect(api.createProfile).toHaveBeenCalledWith({
+        name: 'overlay',
+        type: 'merge',
+        baseProfileId: 'a',
+        content: 'prepend-rules: []\n',
+      })
+      expect(api.listProfiles).toHaveBeenCalled()
+    })
+
     it('baseProfiles / mergeProfiles split the list by type', async () => {
       api.listProfiles.mockResolvedValue([
         meta('a'),

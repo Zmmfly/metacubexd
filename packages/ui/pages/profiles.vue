@@ -65,7 +65,17 @@ const { isBusy, run: withBusy } = useBusyKeys()
 
 const newName = ref('')
 const newMergeName = ref('')
+// Scope of the merge overlay being created: '' = global (composed onto any
+// active base), otherwise the id of the one base profile it applies to.
+const newMergeScope = ref('')
+// Optional initial YAML for the new overlay (migration/backup paste path).
+const newMergeContent = ref('')
 const newScriptName = ref('')
+
+// Scope badge lookup: an overlay's baseProfileId -> owning base profile name.
+const profileNameById = computed(
+  () => new Map(profiles.value.map((p) => [p.id, p.name])),
+)
 
 const editingId = ref<string | null>(null)
 // Name + kind of the profile currently open in the editor, for the editor's
@@ -83,6 +93,9 @@ const editingMerge = ref(false)
 // Whether the open editor targets a script transform — drives the JS editor
 // language and routes save through saveScript (which recomposes).
 const editingScript = ref(false)
+// Whether the open editor targets a visual-editor-managed overlay — shows the
+// overwrite warning (raw YAML edits are lost on the next visual-editor save).
+const editingManaged = ref(false)
 const editingText = ref('')
 const validationMessage = ref('')
 const validationOk = ref<boolean | null>(null)
@@ -162,6 +175,8 @@ const openEditor = (
       editingName.value = name
       editingMerge.value = kind === 'merge'
       editingScript.value = kind === 'script'
+      editingManaged.value =
+        profiles.value.find((p) => p.id === id)?.managedBy === 'visual-editor'
       validationMessage.value = ''
       validationOk.value = null
       // The editor mounts at the bottom of the page; pull it into view AND move
@@ -183,6 +198,7 @@ const closeEditor = () => {
   editingName.value = ''
   editingMerge.value = false
   editingScript.value = false
+  editingManaged.value = false
   editingText.value = ''
 }
 
@@ -261,8 +277,15 @@ const onCreateMerge = () => {
   if (!newMergeName.value.trim()) return
   return withBusy('createMerge', async () => {
     try {
-      await createMerge(newMergeName.value.trim())
+      await createMerge(newMergeName.value.trim(), {
+        baseProfileId: newMergeScope.value || undefined,
+        content: newMergeContent.value.trim()
+          ? newMergeContent.value
+          : undefined,
+      })
       newMergeName.value = ''
+      newMergeScope.value = ''
+      newMergeContent.value = ''
     } catch (e) {
       notifyError(e)
     }
@@ -761,25 +784,53 @@ const onSaveUrl = () => {
                   {{ t('profilesMergesHelp') }}
                 </p>
               </div>
-              <div class="flex items-end gap-2">
-                <label class="flex flex-col gap-1 text-sm">
-                  <span class="text-base-content/60">{{
-                    t('profilesName')
-                  }}</span>
-                  <input
-                    v-model="newMergeName"
-                    class="input-bordered input input-sm"
-                    :placeholder="t('profilesNewMerge')"
-                  />
-                </label>
-                <Button
-                  class="btn-primary btn-sm"
-                  :icon="IconPlus"
-                  :loading="isBusy('createMerge')"
-                  @click="onCreateMerge"
-                >
-                  {{ t('profilesNewMerge') }}
-                </Button>
+              <div class="flex max-w-md flex-col gap-2">
+                <div class="flex flex-wrap items-end gap-2">
+                  <label class="flex flex-col gap-1 text-sm">
+                    <span class="text-base-content/60">{{
+                      t('profilesName')
+                    }}</span>
+                    <input
+                      v-model="newMergeName"
+                      class="input-bordered input input-sm"
+                      :placeholder="t('profilesNewMerge')"
+                    />
+                  </label>
+                  <label class="flex flex-col gap-1 text-sm">
+                    <span class="text-base-content/60">{{
+                      t('profilesMergeScope')
+                    }}</span>
+                    <select
+                      v-model="newMergeScope"
+                      class="select-bordered select select-sm"
+                    >
+                      <option value="">
+                        {{ t('profilesMergeScopeGlobal') }}
+                      </option>
+                      <option
+                        v-for="b in baseProfiles"
+                        :key="b.id"
+                        :value="b.id"
+                      >
+                        {{ b.name }}
+                      </option>
+                    </select>
+                  </label>
+                  <Button
+                    class="btn-primary btn-sm"
+                    :icon="IconPlus"
+                    :loading="isBusy('createMerge')"
+                    @click="onCreateMerge"
+                  >
+                    {{ t('profilesNewMerge') }}
+                  </Button>
+                </div>
+                <textarea
+                  v-model="newMergeContent"
+                  class="textarea-bordered textarea w-full font-mono textarea-sm"
+                  rows="3"
+                  :placeholder="t('profilesMergeContent')"
+                />
               </div>
             </div>
 
@@ -800,6 +851,14 @@ const onSaveUrl = () => {
                       class="badge badge-xs badge-primary"
                     >
                       {{ t('visualEditorManaged') }}
+                    </span>
+                    <span
+                      v-if="
+                        m.baseProfileId && profileNameById.get(m.baseProfileId)
+                      "
+                      class="badge shrink-0 badge-ghost badge-xs"
+                    >
+                      {{ profileNameById.get(m.baseProfileId) }}
                     </span>
                   </span>
                   <label class="flex items-center gap-2 text-sm">
@@ -822,7 +881,6 @@ const onSaveUrl = () => {
 
                 <div class="mt-3 flex flex-wrap gap-2">
                   <Button
-                    v-if="m.managedBy !== 'visual-editor'"
                     class="btn-xs"
                     :icon="IconPencil"
                     :loading="isBusy(`edit:${m.id}`)"
@@ -952,6 +1010,16 @@ const onSaveUrl = () => {
           >
             {{ editingScript ? t('profilesScripts') : t('profilesMerges') }}
           </span>
+        </div>
+
+        <!-- Managed-overlay warning: raw YAML edits here are overwritten the
+             next time the visual editor saves its patch. -->
+        <div
+          v-if="editingManaged"
+          class="mb-3 rounded-xl border border-warning/40 bg-warning/10 p-3 text-sm text-warning"
+          role="alert"
+        >
+          {{ t('profilesMergeManagedWarning') }}
         </div>
 
         <ClientOnly>

@@ -259,6 +259,70 @@ describe('createControlRouter — profiles + SSE', () => {
     })
   })
 
+  it('pOST /api/control/profiles accepts baseProfileId for scoped merge overlays', async () => {
+    const deps = makeDeps()
+    srv = await mount(deps)
+    const res = await fetch(`${srv.base}/api/control/profiles`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'scoped',
+        content: 'a: 1\n',
+        type: 'merge',
+        baseProfileId: 'p1',
+      }),
+    })
+    expect(res.status).toBe(200)
+    expect(deps.profiles.create).toHaveBeenCalledWith({
+      name: 'scoped',
+      content: 'a: 1\n',
+      type: 'merge',
+      baseProfileId: 'p1',
+    })
+  })
+
+  it('pOST /api/control/profiles rejects baseProfileId on non-merge profiles', async () => {
+    const deps = makeDeps()
+    srv = await mount(deps)
+    const res = await fetch(`${srv.base}/api/control/profiles`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'bad', baseProfileId: 'p1' }),
+    })
+    expect(res.status).toBe(400)
+    expect(deps.profiles.create).not.toHaveBeenCalled()
+  })
+
+  it('pOST /api/control/profiles rejects baseProfileId pointing at a non-base profile', async () => {
+    const deps = makeDeps()
+    deps.profiles.list.mockResolvedValue([
+      { id: 'm1', name: 'overlay', type: 'merge', updatedAt: 1 },
+    ])
+    srv = await mount(deps)
+    const res = await fetch(`${srv.base}/api/control/profiles`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'bad',
+        type: 'merge',
+        baseProfileId: 'm1',
+      }),
+    })
+    expect(res.status).toBe(400)
+    expect(deps.profiles.create).not.toHaveBeenCalled()
+    // A missing base id is rejected too.
+    const missing = await fetch(`${srv.base}/api/control/profiles`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'bad',
+        type: 'merge',
+        baseProfileId: 'nope',
+      }),
+    })
+    expect(missing.status).toBe(400)
+  })
+
   it('pUT /api/control/profiles/:id passes through enabled', async () => {
     const deps = makeDeps()
     srv = await mount(deps)
@@ -305,7 +369,7 @@ describe('createControlRouter — profiles + SSE', () => {
     })
   })
 
-  it('rejects direct edits to managed visual overlays', async () => {
+  it('allows raw YAML edits to managed visual overlays', async () => {
     const deps = makeDeps()
     deps.profiles.list.mockResolvedValue([
       {
@@ -321,7 +385,31 @@ describe('createControlRouter — profiles + SSE', () => {
     const res = await fetch(`${srv.base}/api/control/profiles/p1`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ content: 'broken: true\n' }),
+      body: JSON.stringify({ content: 'rules: []\n' }),
+    })
+    expect(res.status).toBe(200)
+    expect(deps.profiles.update).toHaveBeenCalledWith('p1', {
+      content: 'rules: []\n',
+    })
+  })
+
+  it('rejects structural updates to managed visual overlays', async () => {
+    const deps = makeDeps()
+    deps.profiles.list.mockResolvedValue([
+      {
+        id: 'p1',
+        name: 'managed',
+        type: 'merge',
+        managedBy: 'visual-editor',
+        baseProfileId: 'base',
+        updatedAt: 1,
+      },
+    ])
+    srv = await mount(deps)
+    const res = await fetch(`${srv.base}/api/control/profiles/p1`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ enabled: false }),
     })
     expect(res.status).toBe(403)
     expect(deps.profiles.update).not.toHaveBeenCalled()

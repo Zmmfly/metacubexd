@@ -75,13 +75,27 @@ export function useProfiles() {
     name: string
     content?: string
     type?: 'local' | 'merge' | 'script'
+    baseProfileId?: string
   }) => {
     await api.createProfile(body)
     await refresh()
   }
-  // Mint a new merge overlay (YAML composed onto the active base).
-  const createMerge = async (name: string) => {
-    await create({ name, type: 'merge' })
+  // Mint a new merge overlay (YAML composed onto the active base). Pass
+  // baseProfileId to scope it to one base profile instead of global, and
+  // content to seed it with pasted YAML (e.g. when migrating from another
+  // panel) instead of starting empty.
+  const createMerge = async (
+    name: string,
+    options?: { baseProfileId?: string; content?: string },
+  ) => {
+    await create({
+      name,
+      type: 'merge',
+      ...(options?.baseProfileId
+        ? { baseProfileId: options.baseProfileId }
+        : {}),
+      ...(options?.content ? { content: options.content } : {}),
+    })
   }
   // Mint a new script transform (JS run after merges during composition).
   // Seed it with a working identity transform so the contract is obvious:

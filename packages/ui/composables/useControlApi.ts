@@ -102,11 +102,13 @@ export function useControlApi() {
     listProfiles: () => client.get('profiles').json<ProfileMeta[]>(),
     // `type: 'merge'` mints a YAML overlay profile (composed onto the active
     // base); `type: 'script'` mints a JS transform run after merges; omitting
-    // type defaults to a plain local profile (SHARED CONTRACTS).
+    // type defaults to a plain local profile (SHARED CONTRACTS). A merge may
+    // carry baseProfileId to scope it to one base profile instead of global.
     createProfile: (body: {
       name: string
       content?: string
       type?: 'local' | 'merge' | 'script'
+      baseProfileId?: string
     }) => client.post('profiles', { json: body }).json<ProfileMeta>(),
     getProfile: (id: string) =>
       client.get(`profiles/${id}`).json<ProfileDetail>(),
