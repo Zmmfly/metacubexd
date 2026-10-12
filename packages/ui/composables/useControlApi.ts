@@ -120,6 +120,8 @@ export function useControlApi() {
         updateInterval?: number
         // remote-only fetch-via-proxy preference; null clears, omit keeps.
         useProxy?: boolean | null
+        // remote-only subscription URL change; applies from the next refresh.
+        url?: string
       },
     ) => client.put(`profiles/${id}`, { json: body }).json<ProfileMeta>(),
     // DELETE returns 204 No Content — there is no body to parse. Chaining

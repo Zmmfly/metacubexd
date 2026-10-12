@@ -305,6 +305,8 @@ export function createControlRouter(deps: ControlRouterDeps): App {
         updateInterval?: number
         // remote-only fetch-via-proxy preference; null clears, omit keeps.
         useProxy?: boolean | null
+        // remote-only subscription URL change; applies from the next refresh.
+        url?: string
       }
       const meta = (await profiles.list()).find((item) => item.id === id)
       if (meta?.managedBy === 'visual-editor') {

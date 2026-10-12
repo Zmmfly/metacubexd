@@ -162,6 +162,13 @@ export function useProfiles() {
     await api.updateProfile(id, { useProxy })
     await refresh()
   }
+  // Persist a remote profile's subscription URL. Pure metadata change — it
+  // never re-fetches by itself; the next manual/scheduled refresh uses the new
+  // URL (and the agent drops the old subscription's stale traffic snapshot).
+  const setUrl = async (id: string, url: string) => {
+    await api.updateProfile(id, { url })
+    await refresh()
+  }
   const load = (id: string): Promise<ProfileDetail> => api.getProfile(id)
   const validate = (id: string): Promise<ValidateResult> =>
     api.validateProfile(id)
@@ -262,6 +269,7 @@ export function useProfiles() {
     refreshRemote,
     refreshAndApply,
     setUseProxy,
+    setUrl,
     save,
     saveMerge,
     saveScript,

@@ -291,6 +291,20 @@ describe('createControlRouter — profiles + SSE', () => {
     expect(deps.profiles.update).toHaveBeenCalledWith('p1', { name: 'renamed' })
   })
 
+  it('pUT /api/control/profiles/:id passes through a subscription url change', async () => {
+    const deps = makeDeps()
+    srv = await mount(deps)
+    const res = await fetch(`${srv.base}/api/control/profiles/p1`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: 'https://new.example/clash' }),
+    })
+    expect(res.status).toBe(200)
+    expect(deps.profiles.update).toHaveBeenCalledWith('p1', {
+      url: 'https://new.example/clash',
+    })
+  })
+
   it('rejects direct edits to managed visual overlays', async () => {
     const deps = makeDeps()
     deps.profiles.list.mockResolvedValue([

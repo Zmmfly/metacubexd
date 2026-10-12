@@ -147,6 +147,9 @@ export interface ProfileStore {
       // Remote-only fetch-via-proxy preference. `null` clears it; undefined
       // leaves the stored value untouched.
       useProxy?: boolean | null
+      // Remote-only subscription URL change. Pure metadata: it never re-fetches
+      // by itself — the next refresh (manual or scheduled) uses the new URL.
+      url?: string
       editorStatus?: 'clean' | 'conflicted' | null
     },
   ) => Promise<ProfileMeta>

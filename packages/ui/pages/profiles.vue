@@ -5,6 +5,7 @@ import {
   IconBraces,
   IconChevronDown,
   IconCopy,
+  IconLink,
   IconPencil,
   IconPlayerPlay,
   IconPlus,
@@ -52,6 +53,7 @@ const {
   setScriptEnabled,
   setUpdateInterval,
   setUseProxy,
+  setUrl,
   load,
   validate,
   activate,
@@ -376,6 +378,40 @@ const onCopyShareUrl = async () => {
   await copyToClipboard(shareUrl.value)
   toast.success(t('profilesShareCopied'))
 }
+
+// Subscription URL editing (remote profiles only). Updating the URL is a pure
+// metadata change — it never re-fetches by itself; the agent drops the old
+// subscription's stale traffic snapshot and the next manual/scheduled refresh
+// fetches from the new link.
+const urlModalRef = ref<{ open: () => void; close: () => void } | null>(null)
+const urlEditId = ref<string | null>(null)
+const urlEditName = ref('')
+const urlDraft = ref('')
+
+const onEditUrl = (p: ProfileMeta) => {
+  if (!isShareable(p)) return
+  urlEditId.value = p.id
+  urlEditName.value = p.name
+  urlDraft.value = p.url ?? ''
+  urlModalRef.value?.open()
+}
+
+const onSaveUrl = () => {
+  const id = urlEditId.value
+  const url = urlDraft.value.trim()
+  if (!id || !url) return
+  return withBusy(`url:${id}`, async () => {
+    try {
+      await setUrl(id, url)
+      urlModalRef.value?.close()
+      toast.success(t('profilesUrlSaved'), {
+        description: t('profilesUrlSavedHint'),
+      })
+    } catch (e) {
+      notifyError(e)
+    }
+  })
+}
 </script>
 
 <template>
@@ -444,6 +480,28 @@ const onCopyShareUrl = async () => {
               })
             }}
           </p>
+
+          <!-- Subscription URL (remote only): truncated monospace display with
+               an edit affordance — the pencil opens a dialog where the link can
+               be changed (the content editor below edits YAML, not the URL). -->
+          <div
+            v-if="isShareable(p)"
+            class="mt-1 flex items-center gap-1.5 text-xs text-base-content/60"
+          >
+            <IconLink :size="12" class="shrink-0" />
+            <span class="min-w-0 flex-1 truncate font-mono" :title="p.url">
+              {{ p.url }}
+            </span>
+            <button
+              type="button"
+              class="btn h-5 min-h-5 w-5 shrink-0 cursor-pointer border-none btn-ghost p-0 btn-xs"
+              :aria-label="t('profilesEditUrl')"
+              :title="t('profilesEditUrl')"
+              @click="onEditUrl(p)"
+            >
+              <IconPencil :size="12" />
+            </button>
+          </div>
 
           <SubscriptionUsageCard :info="p.subscriptionInfo" />
 
@@ -932,6 +990,45 @@ const onCopyShareUrl = async () => {
         </div>
       </div>
     </template>
+
+    <!-- Subscription URL edit dialog (remote profiles only). Changing the
+         link never re-fetches by itself — the user refreshes explicitly. -->
+    <Modal ref="urlModalRef" :title="t('profilesEditUrl')">
+      <template #icon>
+        <IconLink />
+      </template>
+
+      <form class="flex flex-col gap-3" @submit.prevent="onSaveUrl">
+        <p class="text-sm text-base-content/60">{{ urlEditName }}</p>
+        <label class="flex flex-col gap-1 text-sm">
+          <span class="text-base-content/60">{{ t('profilesUrl') }}</span>
+          <input
+            v-model="urlDraft"
+            type="url"
+            class="input-bordered input w-full font-mono input-sm"
+            placeholder="https://..."
+            autocomplete="off"
+          />
+        </label>
+        <p class="text-xs text-base-content/50">
+          {{ t('profilesUrlSavedHint') }}
+        </p>
+      </form>
+
+      <template #actions>
+        <Button class="btn-ghost btn-sm" @click="urlModalRef?.close()">
+          {{ t('profilesCancel') }}
+        </Button>
+        <Button
+          class="btn-primary btn-sm"
+          :loading="urlEditId ? isBusy(`url:${urlEditId}`) : false"
+          :disabled="!urlDraft.trim()"
+          @click="onSaveUrl"
+        >
+          {{ t('profilesSave') }}
+        </Button>
+      </template>
+    </Modal>
 
     <!-- Subscription QR share dialog (remote profiles only). -->
     <Modal ref="shareModalRef" :title="t('profilesShareTitle')">

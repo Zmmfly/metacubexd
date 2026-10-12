@@ -144,6 +144,15 @@ describe('composables/useControlApi methods', () => {
     })
   })
 
+  it('updateProfile() forwards a subscription url change', async () => {
+    await useControlApi().updateProfile('id1', {
+      url: 'https://new.example/clash',
+    })
+    expect(put).toHaveBeenCalledWith('profiles/id1', {
+      json: { url: 'https://new.example/clash' },
+    })
+  })
+
   it('deleteProfile() DELETEs profiles/:id', async () => {
     await useControlApi().deleteProfile('id1')
     expect(del).toHaveBeenCalledWith('profiles/id1')

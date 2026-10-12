@@ -158,6 +158,16 @@ describe('composables/useProfiles', () => {
     expect(api.listProfiles).toHaveBeenCalled()
   })
 
+  it('setUrl() persists the subscription url then re-lists', async () => {
+    api.updateProfile.mockResolvedValue(meta('a'))
+    const p = useProfiles()
+    await p.setUrl('a', 'https://new.example/clash')
+    expect(api.updateProfile).toHaveBeenCalledWith('a', {
+      url: 'https://new.example/clash',
+    })
+    expect(api.listProfiles).toHaveBeenCalled()
+  })
+
   it('validate() returns the validate result', async () => {
     api.validateProfile.mockResolvedValue({ valid: true, message: 'ok' })
     const p = useProfiles()

@@ -223,6 +223,23 @@ export function createProfileStore(opts: ProfileStoreOptions): ProfileStore {
       // flag (back to direct); undefined leaves it untouched.
       if (p.useProxy === null) delete meta.useProxy
       else if (p.useProxy !== undefined) meta.useProxy = p.useProxy
+      // Subscription URL change (remote only): stored for the NEXT refresh —
+      // updating it never re-fetches by itself. A changed URL invalidates the
+      // previous subscription's traffic/expiry snapshot, so drop it instead of
+      // showing numbers belonging to a different provider until the refresh.
+      let urlChanged = false
+      if (p.url !== undefined) {
+        if (meta.type !== 'remote') {
+          throw new Error(`update: profile ${id} is not a remote subscription`)
+        }
+        const url = p.url.trim()
+        if (!url) throw new Error('update: subscription url must not be empty')
+        if (url !== meta.url) {
+          meta.url = url
+          delete meta.subscriptionInfo
+          urlChanged = true
+        }
+      }
       if (p.editorStatus === null) delete meta.editorStatus
       else if (p.editorStatus !== undefined) meta.editorStatus = p.editorStatus
       // Editor status is derived metadata; changing it must not reset the
@@ -231,7 +248,8 @@ export function createProfileStore(opts: ProfileStoreOptions): ProfileStore {
         p.name != null ||
         p.content != null ||
         p.enabled != null ||
-        p.updateInterval != null
+        p.updateInterval != null ||
+        urlChanged
       ) {
         meta.updatedAt = Date.now()
       }

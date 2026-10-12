@@ -110,6 +110,89 @@ describe('createProfileStore — disk CRUD', () => {
   })
 })
 
+describe('createProfileStore — subscription url updates', () => {
+  // Remote profiles only come from importFromUrl, so these tests need a fake
+  // fetch; seenUrls records every requested subscription URL in order.
+  const setup = async () => {
+    const dir = tmpDir()
+    const seenUrls: string[] = []
+    const fakeFetch = (async (url: string) => {
+      seenUrls.push(url)
+      return new Response('proxies: []\n', {
+        status: 200,
+        headers: {
+          'subscription-userinfo':
+            'upload=1; download=2; total=3; expire=1700000000',
+        },
+      })
+    }) as unknown as typeof fetch
+    let n = 0
+    const store = createProfileStore({
+      dir,
+      activeConfigPath: join(dir, '..', 'active.yaml'),
+      fetch: fakeFetch,
+      idGen: () => `id${++n}`,
+    })
+    await store.importFromUrl('https://old.example/clash', 'sub')
+    return { store, seenUrls }
+  }
+
+  it('update changes a remote subscription url and drops stale traffic info', async () => {
+    const { store } = await setup()
+    const before = (await store.list())[0]!
+    expect(before.subscriptionInfo).toBeDefined()
+    await new Promise((r) => setTimeout(r, 2))
+    const updated = await store.update('id1', {
+      url: 'https://new.example/clash',
+    })
+    expect(updated.url).toBe('https://new.example/clash')
+    // The traffic/expiry snapshot belonged to the OLD subscription; keeping it
+    // would show a different provider's numbers until the next refresh.
+    expect(updated.subscriptionInfo).toBeUndefined()
+    expect(updated.updatedAt).toBeGreaterThanOrEqual(before.updatedAt)
+    const persisted = (await store.list())[0]!
+    expect(persisted.url).toBe('https://new.example/clash')
+    expect(persisted.subscriptionInfo).toBeUndefined()
+  })
+
+  it('update keeps the traffic snapshot when the url is unchanged', async () => {
+    const { store } = await setup()
+    const updated = await store.update('id1', {
+      url: 'https://old.example/clash',
+    })
+    expect(updated.subscriptionInfo).toBeDefined()
+  })
+
+  it('update rejects a url change on a non-remote profile', async () => {
+    const { store } = await setup()
+    await store.create({ name: 'local', content: 'a: 1\n' })
+    await expect(
+      store.update('id2', { url: 'https://x.example/clash' }),
+    ).rejects.toThrow('not a remote subscription')
+  })
+
+  it('update rejects an empty subscription url', async () => {
+    const { store } = await setup()
+    await expect(store.update('id1', { url: '   ' })).rejects.toThrow(
+      'must not be empty',
+    )
+  })
+
+  it('a refresh after the url change fetches from the NEW url', async () => {
+    const { store, seenUrls } = await setup()
+    await store.update('id1', { url: 'https://new.example/clash' })
+    const meta = await store.refresh('id1')
+    expect(seenUrls.at(-1)).toBe('https://new.example/clash')
+    // The fresh fetch re-populates the traffic snapshot for the new provider.
+    expect(meta.subscriptionInfo).toEqual({
+      upload: 1,
+      download: 2,
+      total: 3,
+      expire: 1700000000,
+    })
+  })
+})
+
 describe('createProfileStore — import + active', () => {
   it('importFromUrl uses UA clash.meta, parses Subscription-Userinfo, stores raw content', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mcxd-profiles-imp-'))
