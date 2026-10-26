@@ -1,7 +1,12 @@
 <!-- packages/ui/components/ProfileImportHero.vue -->
 <script setup lang="ts">
 import type { ProfileMeta } from '~/types/control'
-import { IconClipboard, IconDownload, IconFileUpload } from '@tabler/icons-vue'
+import {
+  IconClipboard,
+  IconDownload,
+  IconFileUpload,
+  IconRefresh,
+} from '@tabler/icons-vue'
 import { toast } from 'vue-sonner'
 import { controlErrorMessage } from '~/utils/controlError'
 
@@ -193,7 +198,7 @@ const onClipboard = async () => {
         <Button
           type="submit"
           class="btn-primary btn-sm"
-          :icon="IconDownload"
+          :icon="busy ? IconRefresh : IconDownload"
           :loading="busy"
           :disabled="!url.trim()"
         >
