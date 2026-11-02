@@ -505,6 +505,7 @@
   "profilesActive": "アクティブ",
   "profilesName": "名前",
   "profilesUrl": "サブスクリプション URL",
+  "profilesUserAgent": "User-Agent（任意）",
   "profilesSave": "保存",
   "profilesCancel": "キャンセル",
   "profilesValidationOk": "設定は有効です",

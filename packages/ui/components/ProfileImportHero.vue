@@ -28,6 +28,7 @@ const profileStatus = useProfileStatus()
 
 const url = ref('')
 const name = ref('')
+const userAgent = ref('')
 const busy = ref(false)
 const errorMessage = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -67,6 +68,7 @@ onMounted(() => {
 const afterImport = async (meta: ProfileMeta) => {
   url.value = ''
   name.value = ''
+  userAgent.value = ''
   useProxy.value = false
   errorMessage.value = ''
   await profileStatus.refresh()
@@ -89,6 +91,7 @@ const onImportUrl = async () => {
       u,
       name.value.trim() || undefined,
       useProxy.value || undefined,
+      userAgent.value.trim() || undefined,
     )
     await afterImport(meta)
   } catch (e) {
@@ -205,6 +208,19 @@ const onClipboard = async () => {
           {{ t('profilesImport') }}
         </Button>
       </div>
+
+      <label class="flex flex-col gap-1 text-sm">
+        <span class="text-base-content/60">
+          {{ t('profilesUserAgent') }}
+        </span>
+        <input
+          v-model="userAgent"
+          class="input-bordered input w-full font-mono input-sm"
+          placeholder="clash.meta"
+          autocomplete="off"
+          :disabled="busy"
+        />
+      </label>
 
       <label class="flex w-fit cursor-pointer items-center gap-2 text-sm">
         <input

@@ -1,5 +1,5 @@
 import type { ProfileStore } from './types'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -808,11 +808,11 @@ describe('createProfileStore — refresh', () => {
     expect(refreshed.url).toBe('https://sub.example/clash')
   })
 
-  it('refresh uses a custom stored userAgent', async () => {
+  it('import persists a custom userAgent and refresh reuses it', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mcxd-profiles-ref-ua-'))
-    let seenUA: string | null = null
+    const seenUAs: (string | null)[] = []
     const fakeFetch = (async (_url: string, init?: RequestInit) => {
-      seenUA = new Headers(init?.headers).get('user-agent')
+      seenUAs.push(new Headers(init?.headers).get('user-agent'))
       return new Response('proxies: []\n', { status: 200 })
     }) as unknown as typeof fetch
     const store = createProfileStore({
@@ -821,17 +821,15 @@ describe('createProfileStore — refresh', () => {
       fetch: fakeFetch,
       idGen: () => 'id1',
     })
-    await store.importFromUrl('https://sub.example/clash')
-    // Simulate a stored custom UA by writing the index with userAgent set.
-    const indexPath = join(dir, 'index.json')
-    const list = JSON.parse(readFileSync(indexPath, 'utf8')) as Array<{
-      userAgent?: string
-    }>
-    list[0]!.userAgent = 'custom-agent/1.0'
-    writeFileSync(indexPath, `${JSON.stringify(list, null, 2)}\n`)
+    const imported = await store.importFromUrl(
+      'https://sub.example/clash',
+      undefined,
+      { userAgent: '  custom-agent/1.0  ' },
+    )
+    expect(imported.userAgent).toBe('custom-agent/1.0')
 
     await store.refresh('id1')
-    expect(seenUA).toBe('custom-agent/1.0')
+    expect(seenUAs).toEqual(['custom-agent/1.0', 'custom-agent/1.0'])
   })
 
   it('refresh throws for a local profile (no url)', async () => {

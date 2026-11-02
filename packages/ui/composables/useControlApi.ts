@@ -136,10 +136,15 @@ export function useControlApi() {
       client
         .post(`profiles/${id}/duplicate`, { json: { name } })
         .json<ProfileMeta>(),
-    importProfile: (url: string, name?: string, useProxy?: boolean) =>
+    importProfile: (
+      url: string,
+      name?: string,
+      useProxy?: boolean,
+      userAgent?: string,
+    ) =>
       client
         .post('profiles/import', {
-          json: { url, name, useProxy },
+          json: { url, name, useProxy, userAgent },
           timeout: PROFILE_SUBSCRIPTION_TIMEOUT,
         })
         .json<ProfileMeta>(),

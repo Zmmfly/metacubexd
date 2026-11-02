@@ -505,6 +505,7 @@
   "profilesActive": "当前激活",
   "profilesName": "名称",
   "profilesUrl": "订阅链接",
+  "profilesUserAgent": "User-Agent（可选）",
   "profilesSave": "保存",
   "profilesCancel": "取消",
   "profilesValidationOk": "配置有效",

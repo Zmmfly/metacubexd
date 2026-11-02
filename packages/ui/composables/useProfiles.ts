@@ -113,8 +113,13 @@ export function useProfiles() {
     await api.deleteProfile(id)
     await refresh()
   }
-  const importUrl = async (url: string, name?: string, useProxy?: boolean) => {
-    await api.importProfile(url, name, useProxy)
+  const importUrl = async (
+    url: string,
+    name?: string,
+    useProxy?: boolean,
+    userAgent?: string,
+  ) => {
+    await api.importProfile(url, name, useProxy, userAgent)
     await refresh()
   }
   // Re-fetch a remote subscription in place: the agent overwrites the stored

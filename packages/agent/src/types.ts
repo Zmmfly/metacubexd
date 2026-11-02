@@ -158,8 +158,8 @@ export interface ProfileStore {
   importFromUrl: (
     url: string,
     name?: string,
-    options?: { useProxy?: boolean },
-  ) => Promise<ProfileMeta> // UA 'clash.meta'
+    options?: { useProxy?: boolean; userAgent?: string },
+  ) => Promise<ProfileMeta>
   // Re-fetch a remote profile in place. `options.useProxy` overrides the
   // profile's persisted preference for this one fetch; omitted => follow the
   // stored useProxy flag (what the scheduler does).

@@ -419,9 +419,9 @@ When connected to a bundled agent (desktop app or the server image), the
 dashboard gains a **profile manager**:
 
 - Create, duplicate, rename, and delete multiple profiles.
-- Import a subscription by URL (fetched with `User-Agent: clash.meta`); the
-  `upload / download / total / expire` usage from `Subscription-Userinfo` is
-  shown on a usage card.
+- Import a subscription by URL with an optional custom User-Agent (default:
+  `clash.meta`); the `upload / download / total / expire` usage from
+  `Subscription-Userinfo` is shown on a usage card.
 - Edit any profile in an in-browser **Monaco editor with mihomo YAML schema**
   completion and validation.
 - **Activate** a profile to compose it, validate it with `mihomo -t`, and restart

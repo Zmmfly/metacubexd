@@ -505,6 +505,7 @@
   "profilesActive": "활성",
   "profilesName": "이름",
   "profilesUrl": "구독 URL",
+  "profilesUserAgent": "User-Agent (선택 사항)",
   "profilesSave": "저장",
   "profilesCancel": "취소",
   "profilesValidationOk": "구성이 유효합니다",

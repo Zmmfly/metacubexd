@@ -458,6 +458,7 @@
   "profilesActive": "Активный",
   "profilesName": "Имя",
   "profilesUrl": "URL подписки",
+  "profilesUserAgent": "User-Agent (необязательно)",
   "profilesSave": "Сохранить",
   "profilesCancel": "Отмена",
   "profilesValidationOk": "Конфигурация корректна",

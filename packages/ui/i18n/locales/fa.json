@@ -505,6 +505,7 @@
   "profilesActive": "فعال",
   "profilesName": "نام",
   "profilesUrl": "URL اشتراک",
+  "profilesUserAgent": "User-Agent (اختیاری)",
   "profilesSave": "ذخیره",
   "profilesCancel": "لغو",
   "profilesValidationOk": "پیکربندی معتبر است",

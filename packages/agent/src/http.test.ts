@@ -433,19 +433,24 @@ describe('createControlRouter — profiles + SSE', () => {
     expect(((await res.json()) as Record<string, unknown>).id).toBe('p3')
   })
 
-  it('pOST /api/control/profiles/import imports from { url, name? }', async () => {
+  it('pOST /api/control/profiles/import forwards fetch options', async () => {
     const deps = makeDeps()
     srv = await mount(deps)
     const res = await fetch(`${srv.base}/api/control/profiles/import`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ url: 'https://sub', name: 'sub' }),
+      body: JSON.stringify({
+        url: 'https://sub',
+        name: 'sub',
+        useProxy: true,
+        userAgent: 'custom-agent/1.0',
+      }),
     })
     expect(((await res.json()) as Record<string, unknown>).type).toBe('remote')
     expect(deps.profiles.importFromUrl).toHaveBeenCalledWith(
       'https://sub',
       'sub',
-      { useProxy: undefined },
+      { useProxy: true, userAgent: 'custom-agent/1.0' },
     )
   })
 

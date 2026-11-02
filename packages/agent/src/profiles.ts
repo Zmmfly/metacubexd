@@ -302,7 +302,7 @@ export function createProfileStore(opts: ProfileStoreOptions): ProfileStore {
 
     async importFromUrl(url, name, options) {
       await ensureDir()
-      const userAgent = 'clash.meta'
+      const userAgent = options?.userAgent?.trim() || 'clash.meta'
       const useProxy = options?.useProxy ?? false
       const { content, subscriptionInfo } = await fetchSubscription(
         url,

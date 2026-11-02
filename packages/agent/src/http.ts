@@ -373,10 +373,12 @@ export function createControlRouter(deps: ControlRouterDeps): App {
         url: string
         name?: string
         useProxy?: boolean
+        userAgent?: string
       }
       return withSubscriptionHttpError(() =>
         profiles.importFromUrl(body.url, body.name, {
           useProxy: body.useProxy,
+          userAgent: body.userAgent,
         }),
       )
     }),

@@ -505,6 +505,7 @@
   "profilesActive": "Active",
   "profilesName": "Name",
   "profilesUrl": "Subscription URL",
+  "profilesUserAgent": "User-Agent (optional)",
   "profilesSave": "Save",
   "profilesCancel": "Cancel",
   "profilesValidationOk": "Configuration is valid",
