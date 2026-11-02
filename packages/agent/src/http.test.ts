@@ -444,13 +444,18 @@ describe('createControlRouter — profiles + SSE', () => {
         name: 'sub',
         useProxy: true,
         userAgent: 'custom-agent/1.0',
+        proxyUrl: 'socks5://127.0.0.1:1080',
       }),
     })
     expect(((await res.json()) as Record<string, unknown>).type).toBe('remote')
     expect(deps.profiles.importFromUrl).toHaveBeenCalledWith(
       'https://sub',
       'sub',
-      { useProxy: true, userAgent: 'custom-agent/1.0' },
+      {
+        useProxy: true,
+        userAgent: 'custom-agent/1.0',
+        proxyUrl: 'socks5://127.0.0.1:1080',
+      },
     )
   })
 

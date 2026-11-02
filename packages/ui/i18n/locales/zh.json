@@ -625,6 +625,8 @@
   "profilesAutoUpdate": "自动更新",
   "profilesAutoUpdateOff": "关闭",
   "profilesFetchViaProxy": "通过代理获取",
+  "profilesProxyUrl": "自定义代理地址",
+  "profilesProxyUrlPlaceholder": "留空使用内部代理，支持 http(s):// 和 socks5://",
   "profilesRefreshDirect": "直连更新",
   "profilesRefreshOptions": "更新方式",
   "profilesRefreshViaProxy": "通过代理更新",

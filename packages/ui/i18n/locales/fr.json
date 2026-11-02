@@ -625,6 +625,8 @@
   "profilesAutoUpdate": "Mise à jour auto.",
   "profilesAutoUpdateOff": "Désactivé",
   "profilesFetchViaProxy": "Récupérer via le proxy",
+  "profilesProxyUrl": "URL de proxy personnalisé",
+  "profilesProxyUrlPlaceholder": "Laisser vide pour utiliser le proxy interne ; prend en charge http(s):// et socks5://",
   "profilesRefreshDirect": "Actualiser en direct",
   "profilesRefreshOptions": "Options d'actualisation",
   "profilesRefreshViaProxy": "Actualiser via le proxy",

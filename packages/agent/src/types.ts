@@ -108,8 +108,10 @@ export interface ProfileMeta {
   updateInterval?: number // minutes; only meaningful for remote profiles
   // Remote-only: fetch this subscription through the kernel's local proxy
   // instead of directly. Drives the auto-update scheduler; manual refreshes
-  // may override it per request.
+  // may override it per request. An empty proxyUrl uses the kernel's internal
+  // proxy; an explicit HTTP(S)/SOCKS proxyUrl is reused for later refreshes.
   useProxy?: boolean
+  proxyUrl?: string
   // Managed merge overlays may be scoped to one base profile. Legacy merges
   // omit this field and remain global.
   baseProfileId?: string
@@ -158,7 +160,7 @@ export interface ProfileStore {
   importFromUrl: (
     url: string,
     name?: string,
-    options?: { useProxy?: boolean; userAgent?: string },
+    options?: { useProxy?: boolean; userAgent?: string; proxyUrl?: string },
   ) => Promise<ProfileMeta>
   // Re-fetch a remote profile in place. `options.useProxy` overrides the
   // profile's persisted preference for this one fetch; omitted => follow the

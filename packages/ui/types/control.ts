@@ -40,8 +40,10 @@ export interface ProfileMeta {
   updateInterval?: number
   // remote-only: fetch this subscription through the kernel's local proxy
   // instead of directly (drives the scheduler; manual refresh may override).
-  // SHARED CONTRACTS.
+  // SHARED CONTRACTS. proxyUrl optionally selects an HTTP(S)/SOCKS proxy;
+  // empty/omitted uses the kernel's internal proxy.
   useProxy?: boolean
+  proxyUrl?: string
   baseProfileId?: string
   managedBy?: 'visual-editor'
   editorStatus?: 'clean' | 'conflicted'

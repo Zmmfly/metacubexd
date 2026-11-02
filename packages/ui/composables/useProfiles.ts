@@ -118,8 +118,9 @@ export function useProfiles() {
     name?: string,
     useProxy?: boolean,
     userAgent?: string,
+    proxyUrl?: string,
   ) => {
-    await api.importProfile(url, name, useProxy, userAgent)
+    await api.importProfile(url, name, useProxy, userAgent, proxyUrl)
     await refresh()
   }
   // Re-fetch a remote subscription in place: the agent overwrites the stored

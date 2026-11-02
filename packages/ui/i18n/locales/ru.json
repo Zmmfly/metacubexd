@@ -447,6 +447,8 @@
   "profilesNew": "Новый профиль",
   "profilesImport": "Импорт из URL",
   "profilesFetchViaProxy": "Загружать через прокси",
+  "profilesProxyUrl": "Пользовательский URL прокси",
+  "profilesProxyUrlPlaceholder": "Оставьте пустым для внутреннего прокси; поддерживаются http(s):// и socks5://",
   "profilesRefreshDirect": "Обновить напрямую",
   "profilesRefreshOptions": "Способ обновления",
   "profilesRefreshViaProxy": "Обновить через прокси",

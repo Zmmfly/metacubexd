@@ -175,12 +175,13 @@ describe('composables/useControlApi methods', () => {
     })
   })
 
-  it('importProfile() POSTs profiles/import with a custom User-Agent', async () => {
+  it('importProfile() POSTs profiles/import with custom fetch options', async () => {
     await useControlApi().importProfile(
       'http://sub',
       'subname',
       true,
       'custom-agent/1.0',
+      'socks5://127.0.0.1:1080',
     )
     expect(post).toHaveBeenCalledWith('profiles/import', {
       json: {
@@ -188,6 +189,7 @@ describe('composables/useControlApi methods', () => {
         name: 'subname',
         useProxy: true,
         userAgent: 'custom-agent/1.0',
+        proxyUrl: 'socks5://127.0.0.1:1080',
       },
       timeout: 45_000,
     })

@@ -808,6 +808,86 @@ describe('createProfileStore — refresh', () => {
     expect(refreshed.url).toBe('https://sub.example/clash')
   })
 
+  it('uses the internal proxy when no custom proxy URL is provided', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mcxd-profiles-internal-proxy-'))
+    let directCalls = 0
+    let internalCalls = 0
+    let factoryCalls = 0
+    const directFetch: typeof fetch = async () => {
+      directCalls++
+      return new Response('proxies: []\n', { status: 200 })
+    }
+    const internalFetch: typeof fetch = async () => {
+      internalCalls++
+      return new Response('proxies: []\n', { status: 200 })
+    }
+    const store = createProfileStore({
+      dir,
+      activeConfigPath: join(dir, '..', 'active.yaml'),
+      fetch: directFetch,
+      proxyFetch: internalFetch,
+      proxyFetchFactory: () => {
+        factoryCalls++
+        return directFetch
+      },
+      idGen: () => 'id1',
+    })
+
+    const imported = await store.importFromUrl(
+      'https://sub.example/clash',
+      undefined,
+      { useProxy: true },
+    )
+    expect(imported.useProxy).toBe(true)
+    expect(imported.proxyUrl).toBeUndefined()
+    expect({ directCalls, internalCalls, factoryCalls }).toEqual({
+      directCalls: 0,
+      internalCalls: 1,
+      factoryCalls: 0,
+    })
+  })
+
+  it('persists a custom proxy URL and uses it for import and refresh', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mcxd-profiles-custom-proxy-'))
+    const proxyUrls: string[] = []
+    const callers: string[] = []
+    const directFetch: typeof fetch = async () => {
+      callers.push('direct')
+      return new Response('proxies: []\n', { status: 200 })
+    }
+    const internalFetch: typeof fetch = async () => {
+      callers.push('internal')
+      return new Response('proxies: []\n', { status: 200 })
+    }
+    const customFetch: typeof fetch = async () => {
+      callers.push('custom')
+      return new Response('proxies: []\n', { status: 200 })
+    }
+    const store = createProfileStore({
+      dir,
+      activeConfigPath: join(dir, '..', 'active.yaml'),
+      fetch: directFetch,
+      proxyFetch: internalFetch,
+      proxyFetchFactory: (proxyUrl) => {
+        proxyUrls.push(proxyUrl)
+        return customFetch
+      },
+      idGen: () => 'id1',
+    })
+
+    const proxyUrl = 'socks5://127.0.0.1:1080'
+    const imported = await store.importFromUrl(
+      'https://sub.example/clash',
+      undefined,
+      { useProxy: true, proxyUrl: `  ${proxyUrl}  ` },
+    )
+    expect(imported.proxyUrl).toBe(proxyUrl)
+    await store.refresh('id1')
+
+    expect(proxyUrls).toEqual([proxyUrl, proxyUrl])
+    expect(callers).toEqual(['custom', 'custom'])
+  })
+
   it('import persists a custom userAgent and refresh reuses it', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mcxd-profiles-ref-ua-'))
     const seenUAs: (string | null)[] = []

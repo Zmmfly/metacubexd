@@ -625,6 +625,8 @@
   "profilesAutoUpdate": "به‌روزرسانی خودکار",
   "profilesAutoUpdateOff": "خاموش",
   "profilesFetchViaProxy": "دریافت از طریق پروکسی",
+  "profilesProxyUrl": "URL پروکسی سفارشی",
+  "profilesProxyUrlPlaceholder": "برای استفاده از پروکسی داخلی خالی بگذارید؛ http(s):// و socks5:// پشتیبانی می‌شود",
   "profilesRefreshDirect": "به‌روزرسانی مستقیم",
   "profilesRefreshOptions": "گزینه‌های به‌روزرسانی",
   "profilesRefreshViaProxy": "به‌روزرسانی از طریق پروکسی",

@@ -13,6 +13,7 @@ import {
 import { join } from 'node:path'
 import { parse, stringify } from 'yaml'
 import { ConfigPatchConflictError, isPlainObject, mergeConfigs } from './merge'
+import { createProxiedFetch } from './proxy-fetch'
 import { pickConfigOverrides } from './settings'
 
 export interface ProfileStoreOptions {
@@ -25,6 +26,9 @@ export interface ProfileStoreOptions {
   // the already-running proxy still works. Absent => 'useProxy' requests fall
   // back to the direct fetch.
   proxyFetch?: typeof fetch
+  // Builds a fetch for an explicit HTTP(S)/SOCKS proxy URL. Injectable so
+  // profile tests can verify proxy selection without opening network sockets.
+  proxyFetchFactory?: (proxyUrl: string) => typeof fetch
   // Bounds subscription import/refresh network I/O; default 30_000.
   subscriptionTimeoutMs?: number
   idGen?: () => string
@@ -55,6 +59,7 @@ export function createProfileStore(opts: ProfileStoreOptions): ProfileStore {
   const { dir, activeConfigPath, scriptRunner } = opts
   const doFetch = opts.fetch ?? fetch
   const doProxyFetch = opts.proxyFetch ?? doFetch
+  const doCustomProxyFetch = opts.proxyFetchFactory ?? createProxiedFetch
   const subscriptionTimeoutMs = opts.subscriptionTimeoutMs ?? 30_000
   const idGen = opts.idGen ?? (() => randomUUID())
   const indexPath = join(dir, 'index.json')
@@ -123,17 +128,22 @@ export function createProfileStore(opts: ProfileStoreOptions): ProfileStore {
 
   // Shared fetch+parse used by both importFromUrl (mints a new id) and
   // refresh (overwrites an existing id) so the two stay DRY. `viaProxy`
-  // selects the proxied fetch (see ProfileStoreOptions.proxyFetch).
+  // selects the internal proxy, or `proxyUrl` selects an explicit proxy.
   async function fetchSubscription(
     url: string,
     userAgent: string,
     viaProxy = false,
+    proxyUrl?: string,
   ): Promise<{
     content: string
     subscriptionInfo: ProfileMeta['subscriptionInfo'] | undefined
   }> {
     const signal = AbortSignal.timeout(subscriptionTimeoutMs)
-    const netFetch = viaProxy ? doProxyFetch : doFetch
+    const netFetch = viaProxy
+      ? proxyUrl
+        ? doCustomProxyFetch(proxyUrl)
+        : doProxyFetch
+      : doFetch
     try {
       const res = await netFetch(url, {
         headers: { 'User-Agent': userAgent },
@@ -304,10 +314,12 @@ export function createProfileStore(opts: ProfileStoreOptions): ProfileStore {
       await ensureDir()
       const userAgent = options?.userAgent?.trim() || 'clash.meta'
       const useProxy = options?.useProxy ?? false
+      const proxyUrl = options?.proxyUrl?.trim() || undefined
       const { content, subscriptionInfo } = await fetchSubscription(
         url,
         userAgent,
         useProxy,
+        proxyUrl,
       )
       const id = idGen()
       const meta: ProfileMeta = {
@@ -318,6 +330,7 @@ export function createProfileStore(opts: ProfileStoreOptions): ProfileStore {
         userAgent,
         updatedAt: Date.now(),
         ...(useProxy ? { useProxy } : {}),
+        ...(useProxy && proxyUrl ? { proxyUrl } : {}),
         ...(subscriptionInfo ? { subscriptionInfo } : {}),
       }
       await atomicWrite(profilePath(id), content)
@@ -353,6 +366,7 @@ export function createProfileStore(opts: ProfileStoreOptions): ProfileStore {
         meta.url,
         userAgent,
         viaProxy,
+        meta.proxyUrl,
       )
       // Overwrite the SAME file in place — keep the same id (no orphan).
       await atomicWrite(profilePath(id), content)

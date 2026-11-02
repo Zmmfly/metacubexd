@@ -126,15 +126,22 @@ describe('composables/useProfiles', () => {
     expect(api.listProfiles).toHaveBeenCalled()
   })
 
-  it('importUrl() forwards a custom User-Agent then re-lists', async () => {
+  it('importUrl() forwards custom fetch options then re-lists', async () => {
     api.importProfile.mockResolvedValue(meta('sub'))
     const p = useProfiles()
-    await p.importUrl('http://sub', 'sub', undefined, 'custom-agent/1.0')
+    await p.importUrl(
+      'http://sub',
+      'sub',
+      true,
+      'custom-agent/1.0',
+      'http://127.0.0.1:8080',
+    )
     expect(api.importProfile).toHaveBeenCalledWith(
       'http://sub',
       'sub',
-      undefined,
+      true,
       'custom-agent/1.0',
+      'http://127.0.0.1:8080',
     )
     expect(api.listProfiles).toHaveBeenCalled()
   })

@@ -33,11 +33,12 @@ const busy = ref(false)
 const errorMessage = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
 
-// Whether to fetch the subscription through the kernel's local proxy instead
-// of directly — for regions where direct access to the provider fails. The
-// choice persists onto the created profile's useProxy flag and drives its
-// future auto-updates.
+// Whether to fetch the subscription through a proxy instead of directly. The
+// choice persists onto the created profile and drives its future auto-updates.
+// An empty proxyUrl uses the kernel's internal proxy; an explicit HTTP(S)/SOCKS
+// URL selects that proxy instead.
 const useProxy = ref(false)
+const proxyUrl = ref('')
 
 // Reject pathologically large pastes/files early — a real subscription config is
 // kilobytes, not megabytes.
@@ -70,6 +71,7 @@ const afterImport = async (meta: ProfileMeta) => {
   name.value = ''
   userAgent.value = ''
   useProxy.value = false
+  proxyUrl.value = ''
   errorMessage.value = ''
   await profileStatus.refresh()
   emit('imported', meta)
@@ -92,6 +94,7 @@ const onImportUrl = async () => {
       name.value.trim() || undefined,
       useProxy.value || undefined,
       userAgent.value.trim() || undefined,
+      useProxy.value ? proxyUrl.value.trim() || undefined : undefined,
     )
     await afterImport(meta)
   } catch (e) {
@@ -222,17 +225,30 @@ const onClipboard = async () => {
         />
       </label>
 
-      <label class="flex w-fit cursor-pointer items-center gap-2 text-sm">
+      <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <label
+          class="flex w-fit shrink-0 cursor-pointer items-center gap-2 text-sm"
+        >
+          <input
+            v-model="useProxy"
+            type="checkbox"
+            class="toggle shrink-0 toggle-primary toggle-xs"
+            :disabled="busy"
+          />
+          <span class="text-base-content/70">
+            {{ t('profilesFetchViaProxy') }}
+          </span>
+        </label>
         <input
-          v-model="useProxy"
-          type="checkbox"
-          class="toggle shrink-0 toggle-primary toggle-xs"
-          :disabled="busy"
+          v-model="proxyUrl"
+          class="input-bordered input w-full flex-1 font-mono input-sm"
+          :placeholder="t('profilesProxyUrlPlaceholder')"
+          :aria-label="t('profilesProxyUrl')"
+          autocomplete="off"
+          spellcheck="false"
+          :disabled="busy || !useProxy"
         />
-        <span class="text-base-content/70">
-          {{ t('profilesFetchViaProxy') }}
-        </span>
-      </label>
+      </div>
 
       <div class="flex flex-wrap items-center gap-2">
         <Button

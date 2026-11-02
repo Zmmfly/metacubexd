@@ -141,10 +141,11 @@ export function useControlApi() {
       name?: string,
       useProxy?: boolean,
       userAgent?: string,
+      proxyUrl?: string,
     ) =>
       client
         .post('profiles/import', {
-          json: { url, name, useProxy, userAgent },
+          json: { url, name, useProxy, userAgent, proxyUrl },
           timeout: PROFILE_SUBSCRIPTION_TIMEOUT,
         })
         .json<ProfileMeta>(),

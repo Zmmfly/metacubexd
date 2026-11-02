@@ -625,6 +625,8 @@
   "profilesAutoUpdate": "자동 업데이트",
   "profilesAutoUpdateOff": "꺼짐",
   "profilesFetchViaProxy": "프록시를 통해 가져오기",
+  "profilesProxyUrl": "사용자 지정 프록시 URL",
+  "profilesProxyUrlPlaceholder": "비워 두면 내부 프록시 사용 (http(s):// 및 socks5:// 지원)",
   "profilesRefreshDirect": "직접 업데이트",
   "profilesRefreshOptions": "업데이트 방식",
   "profilesRefreshViaProxy": "프록시를 통해 업데이트",
