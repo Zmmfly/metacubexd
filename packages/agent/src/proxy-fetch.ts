@@ -1,6 +1,12 @@
 import { ProxyAgent } from 'undici'
 
-const SUPPORTED_PROTOCOLS = new Set(['http:', 'https:', 'socks:', 'socks5:'])
+const SUPPORTED_PROTOCOLS = new Set([
+  'http:',
+  'https:',
+  'socks:',
+  'socks5:',
+  'socks5h:',
+])
 
 /**
  * Build a `fetch` that routes through an HTTP(S) or SOCKS proxy. Used by
@@ -12,20 +18,24 @@ const SUPPORTED_PROTOCOLS = new Set(['http:', 'https:', 'socks:', 'socks5:'])
  * substitute a fake and the direct path stays the default global fetch.
  */
 export function createProxiedFetch(proxyUrl: string): typeof fetch {
-  let protocol: string
+  let url: URL
   try {
-    protocol = new URL(proxyUrl).protocol
+    url = new URL(proxyUrl)
   } catch {
     throw new Error('invalid proxy URL')
   }
 
-  if (!SUPPORTED_PROTOCOLS.has(protocol)) {
+  if (!SUPPORTED_PROTOCOLS.has(url.protocol)) {
     throw new Error(
-      `unsupported proxy protocol "${protocol}"; use http(s) or socks5`,
+      `unsupported proxy protocol "${url.protocol}"; use http(s), socks5, or socks5h`,
     )
   }
 
-  const dispatcher = new ProxyAgent(proxyUrl)
+  // Undici's SOCKS5 connector sends target hostnames to the proxy for remote
+  // resolution, which is exactly socks5h semantics. Normalize only the scheme;
+  // credentials, host, port, and any other URL components stay unchanged.
+  if (url.protocol === 'socks5h:') url.protocol = 'socks5:'
+  const dispatcher = new ProxyAgent(url.href)
   return ((input: Parameters<typeof fetch>[0], init?: RequestInit) =>
     fetch(input, {
       ...init,

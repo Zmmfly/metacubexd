@@ -422,8 +422,8 @@ dashboard gains a **profile manager**:
 - Import a subscription by URL with an optional custom User-Agent (default:
   `clash.meta`); the `upload / download / total / expire` usage from
   `Subscription-Userinfo` is shown on a usage card.
-- Fetch subscriptions through the internal proxy or a custom HTTP(S)/SOCKS
-  proxy; a custom proxy is saved and reused for later refreshes.
+- Fetch subscriptions through the internal proxy or a custom HTTP(S), SOCKS5,
+  or SOCKS5H proxy; a custom proxy is saved and reused for later refreshes.
 - Edit any profile in an in-browser **Monaco editor with mihomo YAML schema**
   completion and validation.
 - **Activate** a profile to compose it, validate it with `mihomo -t`, and restart

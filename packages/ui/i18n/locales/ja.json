@@ -626,7 +626,7 @@
   "profilesAutoUpdateOff": "オフ",
   "profilesFetchViaProxy": "プロキシ経由で取得",
   "profilesProxyUrl": "カスタムプロキシ URL",
-  "profilesProxyUrlPlaceholder": "空欄の場合は内部プロキシを使用（http(s)://、socks5:// に対応）",
+  "profilesProxyUrlPlaceholder": "空欄の場合は内部プロキシを使用（http(s)://、socks5(h):// に対応）",
   "profilesRefreshDirect": "直接更新",
   "profilesRefreshOptions": "更新方法",
   "profilesRefreshViaProxy": "プロキシ経由で更新",

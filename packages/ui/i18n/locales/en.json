@@ -626,7 +626,7 @@
   "profilesAutoUpdateOff": "Off",
   "profilesFetchViaProxy": "Fetch via proxy",
   "profilesProxyUrl": "Custom proxy URL",
-  "profilesProxyUrlPlaceholder": "Leave blank to use the internal proxy; supports http(s):// and socks5://",
+  "profilesProxyUrlPlaceholder": "Leave blank to use the internal proxy; supports http(s):// and socks5(h)://",
   "profilesRefreshDirect": "Refresh directly",
   "profilesRefreshOptions": "Refresh options",
   "profilesRefreshViaProxy": "Refresh via proxy",
