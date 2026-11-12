@@ -55,6 +55,8 @@ export type ConfigPatchOperation =
       target: Required<PatchTarget>
       expectedHash: string
       value: ConfigObject
+      /** Original resource used for a three-way rebase after subscription refreshes. */
+      previousValue?: ConfigObject
     }
   | {
       op: 'delete'
@@ -85,6 +87,8 @@ export type ConfigPatchOperation =
       expectedHash: string
       value: ConfigValue
       beforeId?: string
+      afterId?: string
+      fallback?: 'start' | 'end'
     }
   | {
       op: 'sequence-order'
@@ -289,6 +293,7 @@ function namedArrayDiff(
         target: { path: [section], key, id },
         expectedHash: hashConfigValue(previous),
         value: clone(next),
+        previousValue: clone(previous),
       })
     }
   }
@@ -409,12 +414,25 @@ function sequenceDiff(
     const beforeId = next
       .slice(index + 1)
       .find((candidate) => previousById.has(candidate.id))?.id
+    // Newly inserted neighbours are valid preceding anchors too: operations
+    // run in draft order, so they preserve adjacent custom rules if the old
+    // subscription anchors disappear together.
+    const afterId = next
+      .slice(0, index)
+      .reverse()
+      .find((candidate) => !consumedNext.has(candidate.id))?.id
     operations.push({
       op: 'sequence-insert',
       target: { path: [section], id: entry.id },
       expectedHash: hashConfigValue(undefined),
       value: clone(entry.value),
       ...(beforeId ? { beforeId } : {}),
+      ...(afterId ? { afterId } : {}),
+      ...(beforeId
+        ? afterId
+          ? {}
+          : { fallback: 'start' as const }
+        : { fallback: 'end' as const }),
     })
   }
 
@@ -513,6 +531,57 @@ function conflict(
   return { operation, path: operation.target.path, reason, current }
 }
 
+interface RebaseResult {
+  value?: ConfigValue
+  conflict: boolean
+}
+
+/** Merge one local value with a refreshed upstream value relative to their base. */
+function rebaseValue(
+  base: ConfigValue | undefined,
+  local: ConfigValue | undefined,
+  current: ConfigValue | undefined,
+): RebaseResult {
+  if (valuesEqual(local, base)) {
+    return {
+      value: current === undefined ? undefined : clone(current),
+      conflict: false,
+    }
+  }
+  if (valuesEqual(current, base) || valuesEqual(local, current)) {
+    return {
+      value: local === undefined ? undefined : clone(local),
+      conflict: false,
+    }
+  }
+
+  if (isObject(base) && isObject(local) && isObject(current)) {
+    const merged: ConfigObject = {}
+    const keys = new Set([
+      ...Object.keys(base),
+      ...Object.keys(local),
+      ...Object.keys(current),
+    ])
+    for (const key of keys) {
+      const result = rebaseValue(base[key], local[key], current[key])
+      if (result.conflict) return { conflict: true }
+      if (result.value !== undefined) merged[key] = result.value
+    }
+    return { value: merged, conflict: false }
+  }
+
+  if (Array.isArray(base) && Array.isArray(local) && Array.isArray(current)) {
+    const root: ConfigObject = { values: clone(current) }
+    for (const operation of sequenceDiff('values', base, local)) {
+      if (!isSequenceOperation(operation)) return { conflict: true }
+      if (applySequenceOperation(root, operation)) return { conflict: true }
+    }
+    return { value: root.values, conflict: false }
+  }
+
+  return { conflict: true }
+}
+
 function applyNamedOperation(
   root: ConfigObject,
   operation: Extract<ConfigPatchOperation, { op: 'upsert' | 'delete' }>,
@@ -551,6 +620,25 @@ function applyNamedOperation(
     return conflict(operation, 'missing')
   }
   if (hashConfigValue(match.value) !== operation.expectedHash) {
+    if (
+      operation.op === 'upsert' &&
+      operation.expectedHash === hashConfigValue(undefined) &&
+      valuesEqual(match.value, operation.value)
+    ) {
+      // The refreshed subscription independently gained the same resource.
+      return
+    }
+    if (operation.op === 'upsert' && operation.previousValue) {
+      const rebased = rebaseValue(
+        operation.previousValue,
+        operation.value,
+        match.value,
+      )
+      if (!rebased.conflict && isObject(rebased.value)) {
+        collection[match.index] = clone(rebased.value)
+        return
+      }
+    }
     return conflict(operation, 'changed', match.value)
   }
   if (operation.op === 'delete') collection.splice(match.index, 1)
@@ -577,13 +665,23 @@ function applyOrderOperation(
   const currentOrder = [...keyed.keys()].filter((id) =>
     operation.previousIds.includes(id),
   )
-  if (operation.previousIds.some((id) => !keyed.has(id))) {
-    return conflict(operation, 'missing', currentOrder)
+  const missing = operation.previousIds.some((id) => !keyed.has(id))
+  const changed = hashConfigValue(currentOrder) !== operation.expectedHash
+  const reordersExisting = !valuesEqual(
+    operation.previousIds,
+    operation.ids.filter((id) => operation.previousIds.includes(id)),
+  )
+  if (missing || changed) {
+    if (reordersExisting) {
+      return conflict(operation, missing ? 'missing' : 'changed', currentOrder)
+    }
+    // Adding/removing resources used to emit an order operation even when no
+    // existing resource was reordered. Keep the refreshed upstream order for
+    // those legacy operations instead of conflicting on unrelated upstream
+    // additions, removals, or reordering. New patches use the same semantics.
+    return
   }
   // Unknown resources added by a refreshed subscription remain at the end.
-  if (hashConfigValue(currentOrder) !== operation.expectedHash) {
-    return conflict(operation, 'changed', currentOrder)
-  }
   const ordered = operation.ids
     .map((id) => keyed.get(id))
     .filter((v) => v !== undefined)
@@ -639,13 +737,34 @@ function applySequenceOperation(
 
   const index = entries.findIndex((entry) => entry.id === operation.target.id)
   if (operation.op === 'sequence-insert') {
-    if (index >= 0) return conflict(operation, 'duplicate', collection[index])
+    // An identical upstream addition already satisfies this operation.
+    if (index >= 0) return
     let targetIndex = collection.length
-    if (operation.beforeId) {
-      targetIndex = entries.findIndex(
-        (entry) => entry.id === operation.beforeId,
-      )
-      if (targetIndex < 0) return conflict(operation, 'missing')
+    const beforeIndex = operation.beforeId
+      ? entries.findIndex((entry) => entry.id === operation.beforeId)
+      : -1
+    if (beforeIndex >= 0) {
+      targetIndex = beforeIndex
+    } else {
+      const afterIndex = operation.afterId
+        ? entries.findIndex((entry) => entry.id === operation.afterId)
+        : -1
+      if (afterIndex >= 0) {
+        targetIndex = afterIndex + 1
+      } else if (operation.beforeId) {
+        if (
+          operation.fallback === 'start' ||
+          (!operation.afterId && !operation.fallback)
+        ) {
+          // Version-1 patches only recorded a following anchor. Preserve those
+          // legacy additions as leading overrides when that anchor disappears.
+          targetIndex = 0
+        } else if (operation.fallback !== 'end') {
+          // A middle insertion with neither neighbour left is ambiguous; keep
+          // the conflict rather than silently changing rule priority.
+          return conflict(operation, 'missing')
+        }
+      }
     }
     collection.splice(targetIndex, 0, clone(operation.value))
     return
@@ -671,6 +790,47 @@ function isSequenceOperation(
   }
 > {
   return operation.op.startsWith('sequence-')
+}
+
+export interface CapturePatchBaseValuesResult {
+  patch: ConfigPatchV1
+  captured: number
+}
+
+/**
+ * Capture original named resources in legacy patches while their hashes still
+ * match the current base. This must run before replacing a remote base.
+ */
+export function capturePatchBaseValues(
+  current: ConfigDocument | string,
+  patch: ConfigPatchV1,
+): CapturePatchBaseValuesResult {
+  const source = typeof current === 'string' ? openDocument(current) : current
+  let captured = 0
+  const operations = patch.operations.map((operation) => {
+    if (operation.op !== 'upsert' || operation.previousValue !== undefined) {
+      return operation
+    }
+    const collection = getAtPath(source.data, operation.target.path)
+    if (!Array.isArray(collection)) return operation
+    const matches = collection.filter(
+      (value): value is ConfigObject =>
+        isObject(value) &&
+        String(value[operation.target.key]) === operation.target.id,
+    )
+    if (
+      matches.length !== 1 ||
+      hashConfigValue(matches[0]) !== operation.expectedHash
+    ) {
+      return operation
+    }
+    captured++
+    return { ...operation, previousValue: clone(matches[0]!) }
+  })
+  return {
+    patch: captured ? { ...patch, operations } : patch,
+    captured,
+  }
 }
 
 function stringifyTouched(

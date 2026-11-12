@@ -2,7 +2,7 @@ import type {
   ConfigPatchConflict,
   ConfigPatchV1,
 } from '@metacubexd/config-editor'
-import { applyPatch } from '@metacubexd/config-editor'
+import { applyPatch, capturePatchBaseValues } from '@metacubexd/config-editor'
 import { parse, stringify } from 'yaml'
 
 export const VISUAL_PATCH_KEY = 'x-metacubexd-visual-patch'
@@ -24,6 +24,23 @@ export function parseVisualPatch(content: string): ConfigPatchV1 | undefined {
   const patch = parsed[VISUAL_PATCH_KEY]
   if (!isPlainObject(patch) || patch.version !== 1) return undefined
   return patch as unknown as ConfigPatchV1
+}
+
+/** Upgrade a legacy visual overlay without discarding ordinary merge keys. */
+export function captureVisualPatchBaseValues(
+  baseContent: string,
+  overlayContent: string,
+): { content: string; captured: number } {
+  const patch = parseVisualPatch(overlayContent)
+  if (!patch) return { content: overlayContent, captured: 0 }
+  const result = capturePatchBaseValues(baseContent, patch)
+  if (!result.captured) return { content: overlayContent, captured: 0 }
+  const parsed = parse(overlayContent) as unknown
+  if (!isPlainObject(parsed)) return { content: overlayContent, captured: 0 }
+  return {
+    content: stringify({ ...parsed, [VISUAL_PATCH_KEY]: result.patch }),
+    captured: result.captured,
+  }
 }
 
 // Directive keys consumed by an overlay to prepend/append into a base array

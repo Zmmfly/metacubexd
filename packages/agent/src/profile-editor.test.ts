@@ -1,11 +1,13 @@
 import type { MihomoSupervisor } from './types'
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { diffDocument } from '@metacubexd/config-editor'
+import { diffDocument, openDocument } from '@metacubexd/config-editor'
 import { describe, expect, it, vi } from 'vitest'
+import { parse, stringify } from 'yaml'
 import { createProfileConfigEditor } from './profile-editor'
 import { createProfileStore } from './profiles'
+import { applyActiveRefresh } from './refresh-apply'
 
 function state() {
   return {
@@ -118,6 +120,107 @@ describe('profile config editor', () => {
       (await profiles.list()).filter((meta) => meta.type === 'merge'),
     ).toEqual([])
     expect((await profiles.compose('id1')).content).toContain('type: ss')
+  })
+
+  it('upgrades legacy additions and rebases them through an active refresh', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'mcxd-editor-rebase-'))
+    let remote = `proxies:
+  - { name: a, type: direct }
+  - { name: b, type: direct }
+proxy-groups:
+  - { name: group, type: select, proxies: [a, b] }
+rules:
+  - DOMAIN,old.test,DIRECT
+  - MATCH,group
+`
+    const profiles = createProfileStore({
+      dir: join(home, 'profiles'),
+      activeConfigPath: join(home, 'active.yaml'),
+      fetch: (async () => new Response(remote)) as typeof fetch,
+      idGen: (() => {
+        let n = 0
+        return () => `id${++n}`
+      })(),
+    })
+    await profiles.importFromUrl('https://example.test/sub', 'remote')
+    const sup = supervisor()
+    const editor = createProfileConfigEditor({
+      profiles,
+      supervisor: sup,
+      homeDir: home,
+    })
+    const opened = await editor.open('id1')
+    const draft = `proxies:
+  - { name: a, type: direct }
+  - { name: b, type: direct }
+  - { name: custom, type: direct }
+proxy-groups:
+  - { name: group, type: select, proxies: [a, custom, b] }
+rules:
+  - DOMAIN,custom.test,REJECT
+  - DOMAIN,old.test,DIRECT
+  - MATCH,group
+`
+    await editor.apply('id1', diffDocument(opened.editableYaml, draft))
+
+    // Simulate a patch written before three-way resource snapshots and
+    // two-sided rule anchors existed. refresh() must upgrade what it can
+    // before replacing the matching remote base.
+    const managed = (await profiles.list()).find(
+      (meta) => meta.managedBy === 'visual-editor',
+    )!
+    const managedPath = join(home, 'profiles', `${managed.id}.yaml`)
+    const legacy = parse(readFileSync(managedPath, 'utf8')) as {
+      'x-metacubexd-visual-patch': {
+        operations: Array<Record<string, unknown>>
+      }
+    }
+    for (const operation of legacy['x-metacubexd-visual-patch'].operations) {
+      if (operation.op === 'upsert') delete operation.previousValue
+      if (operation.op === 'sequence-insert') {
+        delete operation.afterId
+        delete operation.fallback
+      }
+    }
+    writeFileSync(managedPath, stringify(legacy))
+
+    remote = `proxies:
+  - { name: b, type: direct }
+  - { name: upstream, type: direct }
+proxy-groups:
+  - { name: group, type: select, proxies: [upstream, b], url: https://upstream.test }
+rules:
+  - DOMAIN,new.test,DIRECT
+  - MATCH,group
+`
+    await profiles.refresh('id1')
+    await applyActiveRefresh(profiles, sup, 'id1')
+
+    const rebased = await editor.open('id1')
+    expect(rebased.profile.editorStatus).toBe('clean')
+    expect(rebased.conflicts).toEqual([])
+    const composed = openDocument(
+      readFileSync(join(home, 'active.yaml'), 'utf8'),
+    ).data
+    expect(composed.proxies).toEqual([
+      { name: 'b', type: 'direct' },
+      { name: 'upstream', type: 'direct' },
+      { name: 'custom', type: 'direct' },
+    ])
+    expect(composed['proxy-groups']).toEqual([
+      {
+        name: 'group',
+        type: 'select',
+        proxies: ['upstream', 'custom', 'b'],
+        url: 'https://upstream.test',
+      },
+    ])
+    expect(composed.rules).toEqual([
+      'DOMAIN,custom.test,REJECT',
+      'DOMAIN,new.test,DIRECT',
+      'MATCH,group',
+    ])
+    expect(sup.restart).toHaveBeenCalledTimes(2)
   })
 
   it('restores persisted and active state when the restart fails', async () => {

@@ -61,6 +61,111 @@ describe('config editor document', () => {
     expect(changed.conflicts[0]?.reason).toBe('changed')
   })
 
+  it('rebases a pure named addition when upstream removes or reorders entries', () => {
+    const base = `proxies:\n  - { name: a, type: direct }\n  - { name: b, type: direct }\n`
+    const draft = `${base}  - { name: custom, type: direct }\n`
+    const patch = diffDocument(base, draft)
+    expect(patch.operations.map((op) => op.op)).toEqual(['upsert', 'order'])
+
+    const result = applyPatch(
+      `proxies:\n  - { name: b, type: direct }\n  - { name: upstream, type: direct }\n`,
+      patch,
+    )
+    expect(result.conflicts).toEqual([])
+    expect(result.document.data.proxies).toEqual([
+      { name: 'b', type: 'direct' },
+      { name: 'upstream', type: 'direct' },
+      { name: 'custom', type: 'direct' },
+    ])
+  })
+
+  it('merges non-overlapping group edits and membership updates upstream', () => {
+    const base = `proxy-groups:\n  - { name: group, type: select, proxies: [a, b] }\n`
+    const draft = `proxy-groups:\n  - { name: group, type: select, proxies: [a, custom, b], url: https://local.test }\n`
+    const refreshed = `proxy-groups:\n  - { name: group, type: select, proxies: [upstream, a, b], use: [provider], interval: 30 }\n`
+    const result = applyPatch(refreshed, diffDocument(base, draft))
+
+    expect(result.conflicts).toEqual([])
+    expect(result.document.data['proxy-groups']).toEqual([
+      {
+        name: 'group',
+        type: 'select',
+        proxies: ['upstream', 'a', 'custom', 'b'],
+        use: ['provider'],
+        interval: 30,
+        url: 'https://local.test',
+      },
+    ])
+  })
+
+  it('still reports overlapping named scalar edits after a refresh', () => {
+    const base = `proxy-groups:\n  - { name: group, type: select }\n`
+    const local = `proxy-groups:\n  - { name: group, type: fallback }\n`
+    const upstream = `proxy-groups:\n  - { name: group, type: url-test }\n`
+    const result = applyPatch(upstream, diffDocument(base, local))
+
+    expect(result.conflicts).toEqual([
+      expect.objectContaining({ reason: 'changed' }),
+    ])
+  })
+
+  it('keeps leading rule additions ordered when their original anchor disappears', () => {
+    const base = `rules:\n  - DOMAIN,old.test,DIRECT\n  - MATCH,DIRECT\n`
+    const draft = `rules:\n  - DOMAIN,one.test,REJECT\n  - DOMAIN,two.test,REJECT\n  - DOMAIN,old.test,DIRECT\n  - MATCH,DIRECT\n`
+    const patch = diffDocument(base, draft)
+    const refreshed = `rules:\n  - DOMAIN,new.test,DIRECT\n  - MATCH,DIRECT\n`
+    const result = applyPatch(refreshed, patch)
+
+    expect(result.conflicts).toEqual([])
+    expect(result.document.data.rules).toEqual([
+      'DOMAIN,one.test,REJECT',
+      'DOMAIN,two.test,REJECT',
+      'DOMAIN,new.test,DIRECT',
+      'MATCH,DIRECT',
+    ])
+    expect(applyPatch(result.document, patch).conflicts).toEqual([])
+  })
+
+  it('uses either neighboring anchor for an inserted rule', () => {
+    const base = `rules:\n  - DOMAIN,a.test,DIRECT\n  - DOMAIN,b.test,DIRECT\n`
+    const draft = `rules:\n  - DOMAIN,a.test,DIRECT\n  - DOMAIN,custom.test,REJECT\n  - DOMAIN,b.test,DIRECT\n`
+    const patch = diffDocument(base, draft)
+    const oneAnchor = applyPatch(
+      `rules:\n  - DOMAIN,a.test,DIRECT\n  - DOMAIN,new.test,DIRECT\n`,
+      patch,
+    )
+    expect(oneAnchor.conflicts).toEqual([])
+    expect(oneAnchor.document.data.rules).toEqual([
+      'DOMAIN,a.test,DIRECT',
+      'DOMAIN,custom.test,REJECT',
+      'DOMAIN,new.test,DIRECT',
+    ])
+
+    const noAnchors = applyPatch(`rules:\n  - DOMAIN,new.test,DIRECT\n`, patch)
+    expect(noAnchors.conflicts).toEqual([
+      expect.objectContaining({ reason: 'missing' }),
+    ])
+  })
+
+  it('keeps a legacy anchored rule addition when its anchor disappears', () => {
+    const base = `rules:\n  - DOMAIN,old.test,DIRECT\n`
+    const draft = `rules:\n  - DOMAIN,custom.test,REJECT\n  - DOMAIN,old.test,DIRECT\n`
+    const patch = diffDocument(base, draft)
+    const insert = patch.operations[0]
+    expect(insert?.op).toBe('sequence-insert')
+    if (insert?.op === 'sequence-insert') {
+      delete insert.afterId
+      delete insert.fallback
+    }
+
+    const result = applyPatch(`rules:\n  - DOMAIN,new.test,DIRECT\n`, patch)
+    expect(result.conflicts).toEqual([])
+    expect(result.document.data.rules).toEqual([
+      'DOMAIN,custom.test,REJECT',
+      'DOMAIN,new.test,DIRECT',
+    ])
+  })
+
   it('validates duplicate resources and broken references', () => {
     const diagnostics = validateDocument({
       proxies: [

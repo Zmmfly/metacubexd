@@ -12,7 +12,12 @@ import {
 } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parse, stringify } from 'yaml'
-import { ConfigPatchConflictError, isPlainObject, mergeConfigs } from './merge'
+import {
+  captureVisualPatchBaseValues,
+  ConfigPatchConflictError,
+  isPlainObject,
+  mergeConfigs,
+} from './merge'
 import { createProxiedFetch } from './proxy-fetch'
 import { pickConfigOverrides } from './settings'
 
@@ -368,6 +373,21 @@ export function createProfileStore(opts: ProfileStoreOptions): ProfileStore {
         viaProxy,
         meta.proxyUrl,
       )
+      // Legacy visual patches did not carry the original named resource.
+      // Capture it while the pre-refresh base still matches their hashes, so
+      // non-overlapping upstream edits can be rebased after this overwrite.
+      const previousContent = await readFile(profilePath(id), 'utf8')
+      for (const overlay of list.filter(
+        (item) =>
+          item.managedBy === 'visual-editor' && item.baseProfileId === id,
+      )) {
+        const path = profilePath(overlay.id)
+        const upgraded = captureVisualPatchBaseValues(
+          previousContent,
+          await readFile(path, 'utf8'),
+        )
+        if (upgraded.captured) await atomicWrite(path, upgraded.content)
+      }
       // Overwrite the SAME file in place — keep the same id (no orphan).
       await atomicWrite(profilePath(id), content)
       meta.updatedAt = Date.now()
