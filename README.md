@@ -426,6 +426,9 @@ dashboard gains a **profile manager**:
   or SOCKS5H proxy; a custom proxy is saved and reused for later refreshes.
 - Edit any profile in an in-browser **Monaco editor with mihomo YAML schema**
   completion and validation.
+- Chain a node through another proxy or group with the **Upstream proxy**
+  selector (`dialer-proxy`); direct and indirect cycles are rejected before
+  activation.
 - **Activate** a profile to compose it, validate it with `mihomo -t`, and restart
   the kernel only after validation succeeds.
 

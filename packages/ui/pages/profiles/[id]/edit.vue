@@ -40,6 +40,7 @@ import {
 } from '~/utils/configSchema'
 import { controlErrorMessage } from '~/utils/controlError'
 import {
+  dialerProxyOptions as buildDialerProxyOptions,
   PROXY_GROUP_TYPES,
   PROXY_PROTOCOL_FIELDS,
   PROXY_TYPES,
@@ -148,6 +149,16 @@ const ruleProviders = computed(
     ) as Array<[string, LooseObject]>,
 )
 const diagnostics = computed(() => documentState.value?.diagnostics ?? [])
+const chainTargetOptions = computed(() =>
+  resourceKind.value === 'proxy'
+    ? buildDialerProxyOptions(
+        resourceDraft.value,
+        resourceIndex.value,
+        proxies.value,
+        groups.value,
+      )
+    : [],
+)
 const hasDocumentErrors = computed(() =>
   diagnostics.value.some((diagnostic) => diagnostic.severity === 'error'),
 )
@@ -167,6 +178,7 @@ const commonResourceFields = computed(() => {
     'type',
     'server',
     'port',
+    'dialer-proxy',
     ...(PROXY_PROTOCOL_FIELDS[String(resourceDraft.value.type)] ?? []),
   ]
 })
@@ -1086,7 +1098,9 @@ if (import.meta.client) {
         </label>
         <template v-for="field in commonResourceFields" :key="field">
           <label class="form-control gap-1">
-            <span class="text-sm font-medium">{{ field }}</span>
+            <span class="text-sm font-medium">{{
+              field === 'dialer-proxy' ? t('routingEditorDialerProxy') : field
+            }}</span>
             <select
               v-if="field === 'type'"
               v-model="resourceDraft[field]"
@@ -1104,6 +1118,29 @@ if (import.meta.client) {
                 {{ option }}
               </option>
             </select>
+            <template v-else-if="field === 'dialer-proxy'">
+              <select
+                v-model="resourceDraft[field]"
+                class="select-bordered select select-sm"
+              >
+                <option value="">
+                  {{ t('routingEditorDialerProxyNone') }}
+                </option>
+                <option
+                  v-for="option in chainTargetOptions"
+                  :key="`${option.kind}:${option.name}`"
+                  :value="option.name"
+                  :disabled="option.cycle"
+                >
+                  {{ option.name }} ·
+                  {{ option.kind === 'proxy' ? 'Proxy' : 'Group' }}
+                  {{ option.cycle ? t('routingEditorDialerProxyCycle') : '' }}
+                </option>
+              </select>
+              <span class="text-xs text-base-content/55">
+                {{ t('routingEditorDialerProxyHint') }}
+              </span>
+            </template>
             <input
               v-else-if="
                 ['tls', 'udp', 'skip-cert-verify', 'udp-over-tcp'].includes(

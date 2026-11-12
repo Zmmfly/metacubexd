@@ -14,6 +14,7 @@ import { toast } from 'vue-sonner'
 import { useProxyConfigEditor } from '~/composables/useProxyConfigEditor'
 import {
   BOOLEAN_ROUTING_FIELDS,
+  dialerProxyOptions as buildDialerProxyOptions,
   isSensitiveRoutingField,
   NUMBER_ROUTING_FIELDS,
   PROXY_GROUP_TYPES,
@@ -75,6 +76,16 @@ const availableProviderNames = computed(() =>
   editor.providerNames.value.filter(
     (name) => !getStringList(resourceDraft.value.use).includes(name),
   ),
+)
+const chainTargetOptions = computed(() =>
+  resourceKind.value === 'proxy'
+    ? buildDialerProxyOptions(
+        resourceDraft.value,
+        resourceIndex.value,
+        editor.proxies.value.map((draft) => draft.value),
+        editor.groups.value.map((draft) => draft.value),
+      )
+    : [],
 )
 const resourceDirty = computed(
   () =>
@@ -430,6 +441,9 @@ defineExpose({ open })
                   <template v-if="draft.value.server">
                     · {{ draft.value.server }}:{{ draft.value.port }}</template
                   >
+                  <template v-if="draft.value['dialer-proxy']">
+                    · ⇢ {{ draft.value['dialer-proxy'] }}</template
+                  >
                 </p>
               </div>
               <Button
@@ -598,7 +612,9 @@ defineExpose({ open })
       </p>
       <template v-for="field in resourceFields" :key="field">
         <label class="form-control gap-1">
-          <span class="text-sm font-medium">{{ field }}</span>
+          <span class="text-sm font-medium">{{
+            field === 'dialer-proxy' ? t('routingEditorDialerProxy') : field
+          }}</span>
           <select
             v-if="field === 'type'"
             :value="resourceDraft[field]"
@@ -615,6 +631,28 @@ defineExpose({ open })
               {{ option }}
             </option>
           </select>
+          <template v-else-if="field === 'dialer-proxy'">
+            <select
+              :value="resourceDraft[field]"
+              class="select-bordered select select-sm"
+              @change="updateTextField(field, $event)"
+            >
+              <option value="">{{ t('routingEditorDialerProxyNone') }}</option>
+              <option
+                v-for="option in chainTargetOptions"
+                :key="`${option.kind}:${option.name}`"
+                :value="option.name"
+                :disabled="option.cycle"
+              >
+                {{ option.name }} ·
+                {{ option.kind === 'proxy' ? 'Proxy' : 'Group' }}
+                {{ option.cycle ? t('routingEditorDialerProxyCycle') : '' }}
+              </option>
+            </select>
+            <span class="text-xs text-base-content/55">
+              {{ t('routingEditorDialerProxyHint') }}
+            </span>
+          </template>
           <input
             v-else-if="BOOLEAN_ROUTING_FIELDS.has(field)"
             :checked="resourceDraft[field] === true"

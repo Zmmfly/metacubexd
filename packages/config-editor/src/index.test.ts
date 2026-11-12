@@ -1,8 +1,10 @@
+import type { ConfigObject } from './index'
 import { describe, expect, it } from 'vitest'
 import {
   applyPatch,
   ConfigDocumentError,
   diffDocument,
+  findDialerProxyCycle,
   findResourceReferences,
   openDocument,
   splitRuleFields,
@@ -94,6 +96,24 @@ describe('config editor document', () => {
         use: ['provider'],
         interval: 30,
         url: 'https://local.test',
+      },
+    ])
+  })
+
+  it('preserves a local dialer chain when upstream changes node endpoints', () => {
+    const base = `proxies:\n  - { name: landing, type: ss, server: old-landing.test }\n  - { name: entry, type: ss, server: old-entry.test }\n`
+    const local = `proxies:\n  - { name: landing, type: ss, server: old-landing.test }\n  - { name: entry, type: ss, server: old-entry.test, dialer-proxy: landing }\n`
+    const upstream = `proxies:\n  - { name: landing, type: ss, server: new-landing.test }\n  - { name: entry, type: ss, server: new-entry.test }\n`
+    const result = applyPatch(upstream, diffDocument(base, local))
+
+    expect(result.conflicts).toEqual([])
+    expect(result.document.data.proxies).toEqual([
+      { name: 'landing', type: 'ss', server: 'new-landing.test' },
+      {
+        name: 'entry',
+        type: 'ss',
+        server: 'new-entry.test',
+        'dialer-proxy': 'landing',
       },
     ])
   })
@@ -208,6 +228,55 @@ describe('config editor document', () => {
     )
     expect(result.conflicts).toEqual([
       expect.objectContaining({ reason: 'missing' }),
+    ])
+  })
+
+  // README Profiles & Config Editor: chained proxies must reject cycles.
+  it('accepts acyclic dialer chains and rejects direct and indirect cycles', () => {
+    const acyclic: ConfigObject = {
+      proxies: [
+        { name: 'landing', type: 'direct' },
+        { name: 'exit', type: 'direct', 'dialer-proxy': 'landing' },
+        { name: 'entry', type: 'direct', 'dialer-proxy': 'exit' },
+      ],
+      'proxy-groups': [{ name: 'group', type: 'select', proxies: ['exit'] }],
+    }
+    expect(findDialerProxyCycle(acyclic, 'entry')).toEqual([])
+    expect(
+      validateDocument(acyclic).filter((item) => item.code === 'proxy-cycle'),
+    ).toEqual([])
+
+    const cyclic: ConfigObject = {
+      proxies: [
+        { name: 'landing', type: 'direct', 'dialer-proxy': 'entry' },
+        { name: 'exit', type: 'direct', 'dialer-proxy': 'landing' },
+        { name: 'entry', type: 'direct', 'dialer-proxy': 'exit' },
+      ],
+    }
+    expect(findDialerProxyCycle(cyclic, 'entry')).toEqual([
+      'entry',
+      'exit',
+      'landing',
+      'entry',
+    ])
+    expect(
+      validateDocument(cyclic)
+        .filter((item) => item.code === 'proxy-cycle')
+        .map((item) => item.path),
+    ).toEqual([
+      ['proxies', 0, 'dialer-proxy'],
+      ['proxies', 1, 'dialer-proxy'],
+      ['proxies', 2, 'dialer-proxy'],
+    ])
+
+    const throughGroup: ConfigObject = {
+      proxies: [{ name: 'entry', type: 'direct', 'dialer-proxy': 'group' }],
+      'proxy-groups': [{ name: 'group', type: 'select', proxies: ['entry'] }],
+    }
+    expect(findDialerProxyCycle(throughGroup, 'entry')).toEqual([
+      'entry',
+      'group',
+      'entry',
     ])
   })
 

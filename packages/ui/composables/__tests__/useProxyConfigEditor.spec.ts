@@ -39,6 +39,16 @@ function snapshot() {
   }
 }
 
+const chainedYaml = `
+proxies:
+  - { name: node, type: ss, server: old.test, dialer-proxy: landing }
+  - { name: landing, type: direct }
+proxy-groups:
+  - { name: group, type: select, proxies: [node] }
+rules:
+  - MATCH,group
+`
+
 describe('useProxyConfigEditor', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -111,6 +121,60 @@ describe('useProxyConfigEditor', () => {
         (operation: { target: { path: string[] } }) => operation.target.path[0],
       ),
     ).toEqual(expect.arrayContaining(['proxies', 'proxy-groups']))
+  })
+
+  it('clears a node upstream proxy through the normal patch path', async () => {
+    api.getProfileEditor.mockResolvedValue({
+      ...snapshot(),
+      editableYaml: chainedYaml,
+    })
+    const editor = useProxyConfigEditor()
+    await editor.load()
+    const withoutChain = { ...editor.proxies.value[0]!.value }
+    delete withoutChain['dialer-proxy']
+    editor.update('proxy', 0, withoutChain)
+    await expect(editor.save()).resolves.toBe('saved')
+    const [, patch] = api.applyProfileEditor.mock.calls[0]!
+    const upsert = patch.operations.find(
+      (operation: { op: string }) => operation.op === 'upsert',
+    )
+    expect(upsert.value).not.toHaveProperty('dialer-proxy')
+  })
+
+  it('saves a node upstream proxy through the normal patch path', async () => {
+    api.getProfileEditor.mockResolvedValue({
+      ...snapshot(),
+      editableYaml: chainedYaml.replace(', dialer-proxy: landing', ''),
+    })
+    const editor = useProxyConfigEditor()
+    await editor.load()
+    editor.update('proxy', 0, {
+      ...editor.proxies.value[0]!.value,
+      'dialer-proxy': 'landing',
+    })
+    await expect(editor.save()).resolves.toBe('saved')
+    const [, patch] = api.applyProfileEditor.mock.calls[0]!
+    const upsert = patch.operations.find(
+      (operation: { op: string }) => operation.op === 'upsert',
+    )
+    expect(upsert.value['dialer-proxy']).toBe('landing')
+  })
+
+  it('blocks deleting a node used as another node upstream proxy', async () => {
+    api.getProfileEditor.mockResolvedValue({
+      ...snapshot(),
+      editableYaml: chainedYaml,
+    })
+    const editor = useProxyConfigEditor()
+    await editor.load()
+    expect(editor.remove('proxy', 1)).toBe(false)
+    expect(editor.blockedResourceName.value).toBe('landing')
+    expect(editor.blockedReferences.value).toEqual([
+      expect.objectContaining({
+        kind: 'dialer-proxy',
+        path: ['proxies', 0, 'dialer-proxy'],
+      }),
+    ])
   })
 
   it('rejects duplicate names across nodes and groups', async () => {

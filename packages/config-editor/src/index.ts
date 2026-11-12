@@ -18,6 +18,7 @@ export interface ConfigDiagnostic {
     | 'missing-name'
     | 'missing-type'
     | 'missing-reference'
+    | 'proxy-cycle'
     | 'invalid-rule'
   message: string
   severity: 'error' | 'warning'
@@ -1090,11 +1091,73 @@ export function findResourceReferences(
   )
 }
 
+type ProxyChainGraph = Map<string, Set<string>>
+
+function proxyChainGraph(data: ConfigObject): ProxyChainGraph {
+  const graph: ProxyChainGraph = new Map()
+  for (const section of ['proxies', 'proxy-groups'] as const) {
+    const entries = data[section]
+    if (!Array.isArray(entries)) continue
+    for (const entry of entries) {
+      if (!isObject(entry) || typeof entry.name !== 'string' || !entry.name) {
+        continue
+      }
+      const targets = graph.get(entry.name) ?? new Set<string>()
+      graph.set(entry.name, targets)
+      if (typeof entry['dialer-proxy'] === 'string') {
+        targets.add(entry['dialer-proxy'])
+      }
+      if (section === 'proxy-groups' && Array.isArray(entry.proxies)) {
+        for (const member of entry.proxies) {
+          if (typeof member === 'string') targets.add(member)
+        }
+      }
+    }
+  }
+  return graph
+}
+
+function findProxyChainCycle(graph: ProxyChainGraph, start: string): string[] {
+  const stack: string[] = []
+  const states = new Map<string, 'visiting' | 'done'>()
+  const visit = (name: string): string[] | undefined => {
+    if (states.get(name) === 'visiting') {
+      const index = stack.indexOf(name)
+      return [...stack.slice(index), name]
+    }
+    if (states.get(name) === 'done') return undefined
+    const targets = graph.get(name)
+    if (!targets) {
+      states.set(name, 'done')
+      return undefined
+    }
+    states.set(name, 'visiting')
+    stack.push(name)
+    for (const target of targets) {
+      const cycle = visit(target)
+      if (cycle) return cycle
+    }
+    stack.pop()
+    states.set(name, 'done')
+    return undefined
+  }
+  return visit(start) ?? []
+}
+
+/** Return the first cycle reachable from a named proxy chain, if any. */
+export function findDialerProxyCycle(
+  data: ConfigObject,
+  start: string,
+): string[] {
+  return findProxyChainCycle(proxyChainGraph(data), start)
+}
+
 export function validateDocument(data: ConfigObject): ConfigDiagnostic[] {
   const diagnostics: ConfigDiagnostic[] = []
   const names = resourceNames(data)
   const proxyProviders = mapNames(data, 'proxy-providers')
   const ruleProviders = mapNames(data, 'rule-providers')
+  const chainGraph = proxyChainGraph(data)
 
   for (const [section, identity] of Object.entries(NAMED_ARRAYS)) {
     const entries = data[section]
@@ -1153,6 +1216,28 @@ export function validateDocument(data: ConfigObject): ConfigDiagnostic[] {
           })
         }
       }
+    })
+  }
+
+  for (const section of ['proxies', 'proxy-groups'] as const) {
+    const entries = data[section]
+    if (!Array.isArray(entries)) continue
+    entries.forEach((entry, index) => {
+      if (
+        !isObject(entry) ||
+        typeof entry.name !== 'string' ||
+        typeof entry['dialer-proxy'] !== 'string'
+      ) {
+        return
+      }
+      const cycle = findProxyChainCycle(chainGraph, entry.name)
+      if (!cycle.length) return
+      diagnostics.push({
+        path: [section, index, 'dialer-proxy'],
+        code: 'proxy-cycle',
+        message: `Proxy chain contains a cycle: ${cycle.join(' -> ')}`,
+        severity: 'error',
+      })
     })
   }
 

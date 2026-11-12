@@ -1,3 +1,6 @@
+import type { ConfigObject } from '@metacubexd/config-editor'
+import { findDialerProxyCycle } from '@metacubexd/config-editor'
+
 export const PROXY_TYPES = [
   'ss',
   'ssr',
@@ -64,8 +67,46 @@ export function routingResourceFields(kind: 'proxy' | 'group', type: string) {
     'type',
     'server',
     'port',
+    'dialer-proxy',
     ...(PROXY_PROTOCOL_FIELDS[type] ?? []),
   ]
+}
+
+export interface DialerProxyOption {
+  name: string
+  kind: 'proxy' | 'group'
+  cycle: boolean
+}
+
+/** Build chain-target choices without mutating the editor's resource arrays. */
+export function dialerProxyOptions(
+  draft: ConfigObject,
+  resourceIndex: number | null,
+  proxies: ConfigObject[],
+  groups: ConfigObject[],
+): DialerProxyOption[] {
+  const currentName = typeof draft.name === 'string' ? draft.name : ''
+  const candidates = [
+    ...proxies.map((value) => ({ value, kind: 'proxy' as const })),
+    ...groups.map((value) => ({ value, kind: 'group' as const })),
+  ]
+  return candidates.flatMap(({ value, kind }) => {
+    if (typeof value.name !== 'string' || !value.name) return []
+    const nextDraft = { ...draft, 'dialer-proxy': value.name }
+    const nextProxies =
+      resourceIndex === null
+        ? [...proxies, nextDraft]
+        : proxies.map((proxy, index) =>
+            index === resourceIndex ? nextDraft : proxy,
+          )
+    const cycle = currentName
+      ? findDialerProxyCycle(
+          { proxies: nextProxies, 'proxy-groups': groups },
+          currentName,
+        ).length > 0
+      : false
+    return [{ name: value.name, kind, cycle }]
+  })
 }
 
 export function isSensitiveRoutingField(field: string) {
