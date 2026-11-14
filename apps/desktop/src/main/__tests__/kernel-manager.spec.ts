@@ -1,5 +1,6 @@
 import type { KernelState, MihomoSupervisor } from '@metacubexd/agent/types'
 import { join } from 'node:path'
+import { MIHOMO_VERSION } from '@metacubexd/agent'
 import { describe, expect, it, vi } from 'vitest'
 import { createKernelManager } from '../kernel-manager'
 
@@ -65,7 +66,7 @@ describe('createKernelManager', () => {
       // current is taken from the running supervisor state.
       expect(result.current).toBe('v1.19.10')
       // bundled is the agent's MIHOMO_VERSION default.
-      expect(result.bundled).toBe('v1.19.27')
+      expect(result.bundled).toBe(MIHOMO_VERSION)
     })
 
     it('reports current as undefined when the kernel reports no version', async () => {
@@ -85,7 +86,7 @@ describe('createKernelManager', () => {
 
       const result = await mgr.listVersions()
       expect(result.current).toBeUndefined()
-      expect(result.bundled).toBe('v1.19.27')
+      expect(result.bundled).toBe(MIHOMO_VERSION)
     })
   })
 

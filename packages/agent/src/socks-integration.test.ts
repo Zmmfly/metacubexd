@@ -13,10 +13,11 @@ import { join } from 'node:path'
 import { toNodeListener } from 'h3'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { parse, stringify } from 'yaml'
-import { createAgent } from './index'
+import { createAgent, MIHOMO_VERSION } from './index'
 
 const binaryPath = process.env.SOCKS_TEST_MIHOMO
-const expectedVersion = process.env.SOCKS_TEST_MIHOMO_VERSION ?? '1.19.27'
+const expectedVersion =
+  process.env.SOCKS_TEST_MIHOMO_VERSION ?? MIHOMO_VERSION.replace(/^v/, '')
 const PASSWORD = 'integration-placeholder-only'
 const TOKEN = 'integration-control-token'
 const successReply = Buffer.from([5, 0, 0, 1, 127, 0, 0, 1, 0, 0])

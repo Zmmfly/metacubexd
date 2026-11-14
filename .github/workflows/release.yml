@@ -125,7 +125,7 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           build-args: |
-            MIHOMO_VERSION=v1.19.32
+            MIHOMO_VERSION=v1.19.34
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: |
@@ -201,7 +201,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     env:
-      MIHOMO_VERSION: v1.19.27
+      MIHOMO_VERSION: v1.19.34
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
     steps:

@@ -1,4 +1,4 @@
-export const MIHOMO_VERSION = process.env.MIHOMO_VERSION ?? 'v1.19.27'
+export const MIHOMO_VERSION = process.env.MIHOMO_VERSION ?? 'v1.19.34'
 
 const OS_MAP: Record<string, 'linux' | 'darwin' | 'windows'> = {
   linux: 'linux',

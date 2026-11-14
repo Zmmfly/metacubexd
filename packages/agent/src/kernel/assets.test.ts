@@ -1,11 +1,38 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { MIHOMO_VERSION, mihomoAsset } from './assets'
 
 const V = MIHOMO_VERSION
 
 describe('mIHOMO_VERSION', () => {
-  it('is pinned to v1.19.27 (overridable via env)', () => {
-    expect(MIHOMO_VERSION).toBe(process.env.MIHOMO_VERSION ?? 'v1.19.27')
+  it('is pinned to v1.19.34 (overridable via env)', () => {
+    expect(MIHOMO_VERSION).toBe(process.env.MIHOMO_VERSION ?? 'v1.19.34')
+  })
+
+  // README Kernel versions / docs/build-docker-image.md: metadata, Docker and
+  // desktop release downloads must describe the same bundled kernel default.
+  it('keeps Docker, both release jobs and build documentation on the bundled pin', () => {
+    const pin = 'v1.19.34'
+    const dockerfile = readFileSync(
+      new URL('../../../../apps/server/Dockerfile', import.meta.url),
+      'utf8',
+    )
+    const workflow = readFileSync(
+      new URL('../../../../.github/workflows/release.yml', import.meta.url),
+      'utf8',
+    )
+    const docs = readFileSync(
+      new URL('../../../../docs/build-docker-image.md', import.meta.url),
+      'utf8',
+    )
+    expect(dockerfile).toContain(`ARG MIHOMO_VERSION=${pin}`)
+    const releasePins = [
+      ...workflow.matchAll(
+        /MIHOMO_VERSION(?::|=)\s*(v\d+\.\d+\.\d+)/g,
+      ),
+    ].map((match) => match[1])
+    expect(releasePins).toEqual([pin, pin])
+    expect(docs).toContain(`Dockerfile 默认 \`${pin}\``)
   })
 })
 
