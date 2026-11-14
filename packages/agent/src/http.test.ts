@@ -136,6 +136,50 @@ describe('createControlRouter — info + kernel + auth', () => {
   let srv: Awaited<ReturnType<typeof mount>>
   afterEach(async () => srv?.close())
 
+  it('serializes runtime changes without locking unrelated profile and system-proxy operations', async () => {
+    // README Authenticated SOCKS: config reloads share lifecycle ordering but
+    // unrelated operations must not monopolize the safety-critical queue.
+    const serialize = vi.fn(async (action: () => Promise<unknown>) => action())
+    const deps = {
+      ...makeDeps('tok'),
+      serialize,
+      systemProxy: makeSystemProxy(),
+    }
+    srv = await mount(deps)
+    const headers = {
+      Authorization: 'Bearer tok',
+      'Content-Type': 'application/json',
+    }
+    expect(
+      (
+        await fetch(`${srv.base}/api/control/profiles`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ name: 'new' }),
+        })
+      ).status,
+    ).toBe(200)
+    expect(
+      (
+        await fetch(`${srv.base}/api/control/sysproxy`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ enabled: false }),
+        })
+      ).status,
+    ).toBe(200)
+    expect(serialize).not.toHaveBeenCalled()
+    expect(
+      (
+        await fetch(`${srv.base}/api/control/kernel/start`, {
+          method: 'POST',
+          headers,
+        })
+      ).status,
+    ).toBe(200)
+    expect(serialize).toHaveBeenCalledOnce()
+  })
+
   it('gET /api/control/health is public 200', async () => {
     srv = await mount(makeDeps('tok'))
     const res = await fetch(`${srv.base}/api/control/health`)

@@ -55,6 +55,43 @@ export interface ProfileMeta {
   active?: boolean
 }
 
+export interface SocksUser {
+  id: string
+  username: string
+  enabled: boolean
+  proxy?: string
+  provider?: string
+  hasPassword: boolean
+  error?: string
+}
+export interface SocksSnapshot {
+  enabled: boolean
+  listen: string
+  port: number
+  users: SocksUser[]
+  status: 'disabled' | 'listening' | 'error'
+  error?: string
+}
+export interface SocksUpdate {
+  enabled: boolean
+  listen: string
+  port: number
+  users: {
+    id?: string
+    username: string
+    enabled: boolean
+    proxy?: string
+    provider?: string
+    password?: string
+  }[]
+}
+export interface SocksTarget {
+  name: string
+  type: string
+  provider?: string
+  unavailable?: string
+}
+
 // GET /api/control/info
 export type ControlFeature =
   | 'profiles'
@@ -68,6 +105,7 @@ export type ControlFeature =
   | 'config-sections'
   | 'visual-config-editor'
   | 'tun'
+  | 'socks-service'
 
 export interface ProfileEditorSnapshot {
   profile: ProfileMeta

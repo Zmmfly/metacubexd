@@ -84,6 +84,7 @@ import { createTrafficPoller, formatTraySpeed } from './traffic-poller'
 import { createTray, trayIconPath } from './tray'
 import { createTunConfigWriter } from './tun-config'
 import { createTunRuntime } from './tun-runtime'
+import { createTunTeardown } from './tun-teardown'
 import { checkForUpdates } from './update-check'
 import { registerWindowControls } from './window-controls'
 import { applyWindowSecurity } from './window-security'
@@ -437,6 +438,8 @@ async function boot(): Promise<void> {
     // runtime controller built below once the supervisor/profiles exist.
     tunController,
   })
+  // Tray and Control API must use the same serialized helper handoff wrapper.
+  tunController = agent.tunController ?? tunController
 
   // Now that the supervisor exists, build the real manager. Downloaded kernels
   // land in <userData>/kernels/<version>; switching writes the override file
@@ -553,6 +556,7 @@ async function boot(): Promise<void> {
     // helper connection) is enforced below by gating the in-app supervisor
     // watchdog on tunRuntime.isTunMode().
     onHelperDisconnect: () => {
+      agent?.socks.suspend()
       notify(
         'TUN helper disconnected',
         'Recovering the network — routing falls back to the sidecar.',
@@ -563,7 +567,16 @@ async function boot(): Promise<void> {
   // Back the delegate handed to createAgent with the real runtime controller, and
   // wire the safe-teardown helper for the UI recover action + quit/crash paths.
   realTunController = tunRuntime.controller
-  tunTeardown = tunRuntime.teardown
+  const guardedTeardown = createTunTeardown({
+    tunController: agent.tunController!,
+    logError: (err) => notify('TUN network recovery failed', err),
+  })
+  tunTeardown = {
+    // Helper socket callbacks may inherit an active handoff's async context;
+    // force a queued root operation rather than reentering it concurrently.
+    recoverNetwork: () =>
+      agent!.enqueueRuntimeOperation(() => guardedTeardown.recoverNetwork()),
+  }
 
   // Cold-start restore: if the last session ended in TUN mode, either queue an
   // automatic re-enable (opt-in setting; runs after the kernel starts and ONLY
@@ -931,6 +944,9 @@ function createWindow(): void {
 }
 
 async function shutdownKernel(): Promise<void> {
+  // Latch the public SOCKS gateway closed BEFORE TUN recovery can restart a
+  // sidecar. Its shutdown latch prevents any late readiness callback reopening.
+  await agent?.socks.dispose()
   // Halt subscription auto-update ticking so no refresh fires mid-shutdown.
   profileScheduler?.stop()
   // Stop streaming /traffic — the kernel is about to go away and a reconnect
@@ -1223,9 +1239,18 @@ if (!app.requestSingleInstanceLock()) {
     })
     tray = createTray({
       showWindow: () => focusWindow(),
-      startKernel: () => void agent?.supervisor.start(),
-      stopKernel: () => void agent?.supervisor.stop(),
-      restartKernel: () => void agent?.supervisor.restart(),
+      startKernel: () =>
+        void agent?.supervisor
+          .start()
+          .catch((err) => notify('Kernel start failed', err)),
+      stopKernel: () =>
+        void agent?.supervisor
+          .stop()
+          .catch((err) => notify('Kernel stop failed', err)),
+      restartKernel: () =>
+        void agent?.supervisor
+          .restart()
+          .catch((err) => notify('Kernel restart failed', err)),
       quit: () => app.quit(),
       iconPath: trayIconPath(),
       // boot() (runs above) sets these from the bound kernel state; fall back
@@ -1326,9 +1351,18 @@ if (!app.requestSingleInstanceLock()) {
           platform: process.platform,
           actions: {
             showWindow: () => focusWindow(),
-            startKernel: () => void agent?.supervisor.start(),
-            stopKernel: () => void agent?.supervisor.stop(),
-            restartKernel: () => void agent?.supervisor.restart(),
+            startKernel: () =>
+              void agent?.supervisor
+                .start()
+                .catch((err) => notify('Kernel start failed', err)),
+            stopKernel: () =>
+              void agent?.supervisor
+                .stop()
+                .catch((err) => notify('Kernel stop failed', err)),
+            restartKernel: () =>
+              void agent?.supervisor
+                .restart()
+                .catch((err) => notify('Kernel restart failed', err)),
             openExternal: (url) => void shell.openExternal(url),
             openDataFolder: () => void shell.openPath(app.getPath('userData')),
             openLogsFolder: () => {

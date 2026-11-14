@@ -437,6 +437,65 @@ Schema diagnostics are advisory and never block saving. Activation's
 passes. A **"disable validation"** toggle is available for bleeding-edge mihomo
 keys the bundled schema doesn't know yet.
 
+### Authenticated SOCKS (desktop / server)
+
+Open **Control Center → Authenticated SOCKS** to configure an additional TCP
+SOCKS5 listener. It is **disabled by default**, with the suggested address
+`127.0.0.1:10808`; it does not replace the existing mixed proxy port.
+
+- Create multiple username/password accounts, enable or disable each account,
+  and choose its outbound target. Leaving an existing account's password blank
+  keeps its password; new accounts require a password.
+- A **fixed binding** uses the chosen node, safe proxy group, or an existing
+  `dialer-proxy` chain in all three main running modes: `rule`, `global`, and
+  `direct`. Binding a group fixes the **group identity**, not its selected leaf;
+  the group's own selection and health policy still apply.
+- **Follow main routing** is an explicit alternative, not a fallback for a broken
+  binding. Missing or unsafe fixed targets are blocked; they never silently
+  become follow-routing or direct connections. Other valid accounts can keep
+  working after a profile refresh removes one account's target.
+- Account settings live outside subscription profiles, so they survive refreshes
+  and application restarts. Client passwords are stored as salted scrypt hashes
+  and are not returned by the settings API. Private backend credentials are
+  generated separately in owner-only runtime files.
+- Saving performs a full Mihomo configuration reload, preserves the observed
+  main mode and explicit Selector-group choices, and disconnects this service's existing
+  sessions. Reload or private-listener verification failures are shown as an
+  error; desired settings remain saved for the next successful kernel start.
+
+Fixed bindings accept top-level nodes, statically verifiable groups and static
+`inline` provider nodes. Potentially empty groups require a fail-closed policy
+such as `empty-fallback: REJECT`, and the complete chain must be verifiable.
+Dynamic HTTP/file provider-only targets and groups depending on them are marked
+unavailable in this first version; materialize the required node in top-level
+`proxies` instead. Unsafe dependency graphs are rejected rather than changing
+an existing profile's routing policy. Names beginning with
+`__metacubexd_socks__` and `x-metacubexd-socks-service` are reserved for the
+service's generated runtime configuration.
+
+Use a client with remote-name SOCKS support, for example:
+
+```sh
+curl --proxy socks5h://127.0.0.1:10808 \
+  --proxy-user 'alice:YOUR_PASSWORD' https://example.com
+```
+
+Here `socks5h` means that the client sends the domain name through SOCKS instead
+of resolving it locally. Final DNS routing still follows your Mihomo DNS
+configuration. This listener supports **TCP CONNECT only**, not SOCKS BIND or
+UDP ASSOCIATE.
+
+**Security:** ordinary SOCKS5 username/password authentication is not encrypted.
+Keep the default loopback binding, or protect remote access with a secure tunnel
+and firewall. In Docker, a published port also needs a reachable container-side
+listen address; for local-host access, set the listener to `0.0.0.0` inside the
+container and publish only `127.0.0.1:10808:10808`. Do not expose it publicly
+without an appropriate transport-security layer.
+
+On desktop, disable TUN before using ordinary kernel Start/Stop/Restart while
+the privileged helper owns the kernel; these operations refuse to start a second
+kernel or pretend to stop the helper-owned one.
+
 ### Kernel versions and custom binaries
 
 Both the desktop app and the server bundle a pinned mihomo release. The current

@@ -85,6 +85,32 @@ describe('composables/useControlApi methods', () => {
     }
   })
 
+  // README Authenticated SOCKS: requests must not retry password-bearing writes.
+  it('sOCKS methods preserve complete replacement payloads with bounded no-retry requests', async () => {
+    const api = useControlApi()
+    await api.getSocks()
+    expect(get).toHaveBeenCalledWith('socks', { retry: 0, timeout: 360000 })
+    await api.getSocksTargets()
+    expect(get).toHaveBeenCalledWith('socks/targets', {
+      retry: 0,
+      timeout: 360000,
+    })
+    const body = {
+      enabled: true,
+      listen: '127.0.0.1',
+      port: 10808,
+      users: [
+        { username: 'test', enabled: true, password: 'test-only-placeholder' },
+      ],
+    }
+    await api.setSocks(body)
+    expect(put).toHaveBeenCalledWith('socks', {
+      json: body,
+      retry: 0,
+      timeout: 360000,
+    })
+  })
+
   it('getInfo() GETs info', async () => {
     const api = useControlApi()
     await api.getInfo()

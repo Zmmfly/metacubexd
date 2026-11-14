@@ -29,7 +29,7 @@ export function createTunConfigWriter(opts: {
     await opts.profiles.setSection(activeId, key, value)
     const temporary = `${opts.activeConfigPath}.${randomUUID()}.tmp`
     try {
-      await writeFile(temporary, doc.toString())
+      await writeFile(temporary, doc.toString(), { mode: 0o600 })
       await rename(temporary, opts.activeConfigPath)
     } finally {
       await rm(temporary, { force: true })

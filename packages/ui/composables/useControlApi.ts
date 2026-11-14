@@ -9,6 +9,9 @@ import type {
   ProfileEditorPreview,
   ProfileEditorSnapshot,
   ProfileMeta,
+  SocksSnapshot,
+  SocksTarget,
+  SocksUpdate,
   SystemProxyState,
   TunStatus,
   ValidateResult,
@@ -82,6 +85,16 @@ export function useControlApi() {
     base,
     token,
     getInfo: () => client.get('info').json<ControlInfo>(),
+    getSocks: () =>
+      client.get('socks', { retry: 0, timeout: 360000 }).json<SocksSnapshot>(),
+    setSocks: (body: SocksUpdate) =>
+      client
+        .put('socks', { json: body, retry: 0, timeout: 360000 })
+        .json<SocksSnapshot>(),
+    getSocksTargets: () =>
+      client
+        .get('socks/targets', { retry: 0, timeout: 360000 })
+        .json<{ targets: SocksTarget[] }>(),
     getKernelStatus: () => client.get('kernel/status').json<KernelState>(),
     startKernel: () => client.post('kernel/start').json<KernelState>(),
     stopKernel: () => client.post('kernel/stop').json<KernelState>(),

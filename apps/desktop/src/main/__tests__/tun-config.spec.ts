@@ -1,5 +1,5 @@
 import type { ProfileStore } from '@metacubexd/agent/types'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -88,6 +88,32 @@ describe('tun config handoff', () => {
       'subscription-secret',
     )
   })
+
+  // README Authenticated SOCKS: helper handoff must not expose runtime-only
+  // listener credentials to other local users under a normal 022 umask.
+  it.skipIf(process.platform === 'win32')(
+    'keeps private SOCKS runtime credentials owner-only across helper handoffs',
+    async () => {
+      const listeners = [
+        {
+          name: '__metacubexd_socks__test',
+          type: 'socks',
+          users: [{ username: 'internal', password: 'private-only' }],
+        },
+      ]
+      await writeFile(
+        activeConfigPath,
+        stringify({ ...runtimeConfig, listeners }),
+      )
+      await chmod(activeConfigPath, 0o644)
+      await setSection('tun', buildTunConfig({ stack: 'system' }))
+      expect((await stat(activeConfigPath)).mode & 0o777).toBe(0o600)
+      expect((await readRuntime()).listeners).toEqual(listeners)
+      await setSection('tun', null)
+      expect((await stat(activeConfigPath)).mode & 0o777).toBe(0o600)
+      expect((await readRuntime()).listeners).toEqual(listeners)
+    },
+  )
 
   it('removes TUN from both files without reapplying a merge layer or source ports', async () => {
     await setSection('tun', buildTunConfig({ stack: 'system' }))

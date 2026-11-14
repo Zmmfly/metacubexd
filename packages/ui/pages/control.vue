@@ -96,6 +96,13 @@ const showBackup = computed(() => hasFeature('webdav-backup'))
         <SystemProxyControlPanel />
       </section>
 
+      <section
+        v-if="hasFeature('socks-service')"
+        class="cc-fade-in flex flex-col gap-4"
+      >
+        <SocksServicePanel />
+      </section>
+
       <!-- Desktop shell: silent update check, TUN auto-restore, tray, hotkeys -->
       <section v-if="showDesktop" class="cc-fade-in flex flex-col gap-4">
         <h2 class="cc-section-title">

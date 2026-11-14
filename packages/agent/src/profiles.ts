@@ -2,14 +2,7 @@ import type { ScriptRunner } from './script'
 import type { ProfileMeta, ProfileStore } from './types'
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import {
-  copyFile,
-  mkdir,
-  readFile,
-  rename,
-  rm,
-  writeFile,
-} from 'node:fs/promises'
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parse, stringify } from 'yaml'
 import {
@@ -77,7 +70,7 @@ export function createProfileStore(opts: ProfileStoreOptions): ProfileStore {
 
   async function atomicWrite(path: string, content: string): Promise<void> {
     const temporary = `${path}.${randomUUID()}.tmp`
-    await writeFile(temporary, content)
+    await writeFile(temporary, content, { mode: 0o600 })
     try {
       await rename(temporary, path)
     } finally {
@@ -414,7 +407,10 @@ export function createProfileStore(opts: ProfileStoreOptions): ProfileStore {
       await mkdir(join(activeConfigPath, '..'), { recursive: true })
       // Snapshot the previous active config so /kernel/rollback can restore it.
       if (existsSync(activeConfigPath)) {
-        await copyFile(activeConfigPath, `${activeConfigPath}.bak`)
+        await atomicWrite(
+          `${activeConfigPath}.bak`,
+          await readFile(activeConfigPath, 'utf8'),
+        )
       }
       await atomicWrite(activeConfigPath, content)
       await writeState({ activeId: id })
@@ -499,7 +495,7 @@ export function createProfileStore(opts: ProfileStoreOptions): ProfileStore {
       const bak = `${activeConfigPath}.bak`
       if (!existsSync(bak)) return false
       await mkdir(join(activeConfigPath, '..'), { recursive: true })
-      await copyFile(bak, activeConfigPath)
+      await atomicWrite(activeConfigPath, await readFile(bak, 'utf8'))
       return true
     },
 
@@ -508,7 +504,10 @@ export function createProfileStore(opts: ProfileStoreOptions): ProfileStore {
       // Keep the broken config aside (same .bak channel) so an operator can still
       // inspect it on the volume after a reset-to-minimal recovery.
       if (existsSync(activeConfigPath)) {
-        await copyFile(activeConfigPath, `${activeConfigPath}.bak`)
+        await atomicWrite(
+          `${activeConfigPath}.bak`,
+          await readFile(activeConfigPath, 'utf8'),
+        )
       }
       // Empty body => the supervisor's injectClashConfig writes just its managed
       // header (external-controller/secret/mixed-port) and mihomo runs on its

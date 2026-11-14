@@ -1,7 +1,7 @@
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   AGENT_VERSION,
   createAgent,
@@ -47,6 +47,7 @@ describe('createAgent', () => {
         'runtime-config',
         'config-sections',
         'visual-config-editor',
+        'socks-service',
       ],
     })
     expect(info.platform).toMatchObject({
@@ -128,15 +129,22 @@ describe('createAgent', () => {
     expect((agent as Record<string, unknown>).tunController).toBeUndefined()
   })
 
-  it('info().features includes tun when a controller is injected', () => {
+  it('info().features includes tun and serializes the injected controller handoff', async () => {
     const tunController = {
-      enable: async () => {},
-      disable: async () => {},
+      enable: vi.fn(async () => {}),
+      disable: vi.fn(async () => {}),
       status: async () => ({ enabled: false, mode: 'sidecar' as const }),
     }
     const agent = createAgent({ ...opts(), tunController })
     expect(agent.info().features).toContain('tun')
-    expect(agent.tunController).toBe(tunController)
+    await agent.tunController!.enable({ stack: 'mixed' })
+    expect(tunController.enable).toHaveBeenCalledWith({ stack: 'mixed' })
+    await agent.tunController!.disable()
+    expect(tunController.disable).toHaveBeenCalledOnce()
+    expect(await agent.tunController!.status()).toEqual(
+      await tunController.status(),
+    )
+    await agent.dispose()
   })
 
   it('re-exports the public surface', () => {

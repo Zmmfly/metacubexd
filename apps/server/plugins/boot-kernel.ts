@@ -12,8 +12,10 @@ import { getAgent } from '../lib/supervisor'
 // action cover recovery. With no profile yet, the supervisor writes a header-only
 // active config (external-controller/secret/mixed-port) and mihomo runs on its
 // defaults — enough for the dashboard to connect; importing a profile restarts it.
-export default defineNitroPlugin(() => {
-  const { supervisor, scheduler } = getAgent()
+export default defineNitroPlugin((nitro) => {
+  const agent = getAgent()
+  const { supervisor, scheduler } = agent
+  nitro.hooks.hook('close', () => agent.dispose())
   console.log('[kernel] starting bundled mihomo on boot…')
   supervisor
     .start()

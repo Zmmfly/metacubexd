@@ -1,11 +1,18 @@
 import type { SupervisorOptions } from './types'
 import { Buffer } from 'node:buffer'
 import { EventEmitter } from 'node:events'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { parse } from 'yaml'
+import { createOperationQueue } from './operation-queue'
 import { createSupervisor } from './supervisor'
 
 // Minimal ChildProcess double: stdout/stderr emitters + kill spy + emit-exit helper.
@@ -38,6 +45,99 @@ function baseOpts(): SupervisorOptions {
     stopTimeoutMs: 500,
   }
 }
+
+// README Authenticated SOCKS: final runtime secrets and readiness probes must
+// stay inside the same lifecycle operation, including the crash watchdog.
+describe('supervisor authenticated SOCKS integration hooks', () => {
+  it.skipIf(process.platform === 'win32')(
+    'replaces a legacy world-readable runtime before writing private credentials',
+    async () => {
+      const opts = baseOpts()
+      writeFileSync(opts.activeConfigPath, 'proxies: []\n')
+      chmodSync(opts.activeConfigPath, 0o644)
+      const proc = new FakeProc()
+      const sup = createSupervisor(
+        {
+          ...opts,
+          transformConfig: async (content) =>
+            `${content}# private SOCKS credential generation\n`,
+        },
+        {
+          spawn: (() => proc) as never,
+          fetch: (async () =>
+            new Response(
+              JSON.stringify({ version: '1.19.27' }),
+            )) as typeof fetch,
+        },
+      )
+      try {
+        await sup.start()
+        expect(statSync(opts.activeConfigPath).mode & 0o777).toBe(0o600)
+        expect(readFileSync(opts.activeConfigPath, 'utf8')).toContain(
+          'private SOCKS credential generation',
+        )
+      } finally {
+        await sup.dispose()
+      }
+    },
+  )
+
+  it('queues a crash-watchdog restart instead of reentering a still-pending readiness probe', async () => {
+    let enterFirst!: () => void
+    let finishProbe!: () => void
+    let enterSecond!: () => void
+    const firstEntered = new Promise<void>((resolve) => {
+      enterFirst = resolve
+    })
+    const probe = new Promise<void>((resolve) => {
+      finishProbe = resolve
+    })
+    const secondEntered = new Promise<void>((resolve) => {
+      enterSecond = resolve
+    })
+    const processes = [new FakeProc(), new FakeProc()]
+    let count = 0
+    let readyCalls = 0
+    const timers: Array<{ fn: () => void; ms: number }> = []
+    const transform = vi.fn(async (content: string) => content)
+    const sup = createSupervisor(
+      {
+        ...baseOpts(),
+        serialize: createOperationQueue(),
+        restartBackoffMs: 7,
+        transformConfig: transform,
+        onReady: async () => {
+          if (++readyCalls === 1) {
+            enterFirst()
+            await probe
+          } else enterSecond()
+        },
+      },
+      {
+        spawn: (() => processes[count++]!) as never,
+        fetch: (async () =>
+          new Response(JSON.stringify({ version: '1.19.27' }))) as typeof fetch,
+        setTimer: ((fn: () => void, ms: number) => {
+          timers.push({ fn, ms })
+          return timers.length
+        }) as never,
+        clearTimer: () => {},
+      },
+    )
+    const starting = sup.start()
+    await firstEntered
+    processes[0]!.emitExit(23)
+    timers.find((timer) => timer.ms === 7)!.fn()
+    await Promise.resolve()
+    expect(count).toBe(1)
+    expect(transform).toHaveBeenCalledOnce()
+    finishProbe()
+    await starting
+    await secondEntered
+    expect(count).toBe(2)
+    await sup.dispose()
+  })
+})
 
 describe('createSupervisor — initial state', () => {
   it('starts in stopped with default external-controller + a secret', () => {

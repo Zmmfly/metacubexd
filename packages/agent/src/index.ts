@@ -2,12 +2,14 @@ import type { ScriptRunner } from './script'
 import type { CreateSupervisorOptions } from './supervisor'
 import type {
   KernelManager,
+  MihomoSupervisor,
   SystemProxyController,
   TunController,
 } from './types'
 import { join } from 'node:path'
 import { createControlRouter } from './http'
 import { MIHOMO_VERSION } from './kernel/assets'
+import { createOperationQueue } from './operation-queue'
 import { createProfileConfigEditor } from './profile-editor'
 import { createProfileStore } from './profiles'
 import { createProxiedFetch } from './proxy-fetch'
@@ -15,7 +17,9 @@ import { applyActiveRefresh } from './refresh-apply'
 import { createProfileScheduler } from './scheduler'
 import { createScriptRunner } from './script'
 import { createAgentSettings, fillMissingConfigOverrides } from './settings'
+import { createSocksService } from './socks-service'
 import { createSupervisor } from './supervisor'
+import { TunPreconditionError } from './tun'
 
 export const AGENT_VERSION = '0.0.0'
 
@@ -63,6 +67,9 @@ export type {
   ConfigOverrides,
   ConfigOverrideValue,
 } from './settings'
+export { createSocksService } from './socks-service'
+export type { SocksService } from './socks-service'
+export type { SocksConfigInput, SocksSnapshot } from './socks-types'
 export { createSupervisor } from './supervisor'
 export type { CreateSupervisorOptions, SupervisorDeps } from './supervisor'
 export { buildTunConfig, TunPreconditionError } from './tun'
@@ -90,6 +97,16 @@ export interface AgentInfo {
 }
 
 export function createAgent(opts: CreateAgentOptions) {
+  const serialize = createOperationQueue()
+  let supervisor: MihomoSupervisor
+  let tunTransition = false
+  const socks = createSocksService({
+    filePath: join(opts.homeDir, 'socks-service.json'),
+    activeConfigPath: opts.activeConfigPath,
+    getKernelState: () => supervisor.getState(),
+    validate: (path) => supervisor.validate(path),
+    serialize,
+  })
   // Fetch through the kernel's own mixed port for subscription/geo downloads
   // the user routes via proxy (network-restricted regions). Only available
   // when the kernel has a mixed port configured; TUN-only setups (mixedPort 0)
@@ -117,8 +134,21 @@ export function createAgent(opts: CreateAgentOptions) {
       await fillMissingConfigOverrides(settings, values)
     },
   })
-  const supervisor = createSupervisor({
+  // Active-file writes share the lifecycle ordering boundary, including a
+  // scheduled subscription refresh racing an authenticated SOCKS update.
+  const setActive = profiles.setActive
+  profiles.setActive = (id) => serialize(() => setActive(id))
+  const nativeSupervisor = createSupervisor({
     ...opts,
+    serialize,
+    transformConfig: async (content) =>
+      socks.prepareConfig(
+        opts.transformConfig ? await opts.transformConfig(content) : content,
+      ),
+    onReady: async () => {
+      await opts.onReady?.()
+      await socks.activate()
+    },
     // Fall back to the settings-backed override bag: the supervisor injects
     // these into active.yaml at spawn, so the panel-editable switches outlive a
     // subscription refresh. An explicit caller-supplied source stays
@@ -127,12 +157,89 @@ export function createAgent(opts: CreateAgentOptions) {
       opts.configOverrides ??
       (() => settings.read().then((s) => s.configOverrides)),
   })
+  const assertSidecarOwner = async () => {
+    if (
+      !tunTransition &&
+      opts.tunController &&
+      (await opts.tunController.status()).mode === 'tun'
+    ) {
+      throw new TunPreconditionError(
+        'The TUN helper owns the kernel; disable TUN before using kernel start, stop or restart',
+      )
+    }
+  }
+  supervisor = {
+    ...nativeSupervisor,
+    start: () =>
+      serialize(async () => {
+        await assertSidecarOwner()
+        return nativeSupervisor.start()
+      }),
+    stop: () =>
+      serialize(async () => {
+        await assertSidecarOwner()
+        return nativeSupervisor.stop()
+      }),
+    restart: () =>
+      serialize(async () => {
+        await assertSidecarOwner()
+        return nativeSupervisor.restart()
+      }),
+  }
   const profileEditor = createProfileConfigEditor({
     profiles,
     supervisor,
     homeDir: opts.homeDir,
   })
-  const { systemProxy, kernelManager, tunController } = opts
+  supervisor.on('state', (state) => {
+    if (state.status !== 'running') socks.suspend()
+  })
+  const { systemProxy, kernelManager } = opts
+  // Desktop helper transitions do not pass through supervisor.start(). Serialize
+  // the whole handoff and probe the same private generation before reopening.
+  const originalTun = opts.tunController
+  const tunController: TunController | undefined = originalTun
+    ? {
+        status: () => originalTun.status(),
+        enable: (options) =>
+          serialize(async () => {
+            socks.suspend()
+            tunTransition = true
+            try {
+              await originalTun.enable(options)
+            } finally {
+              tunTransition = false
+              await socks.activate()
+            }
+          }),
+        disable: () =>
+          serialize(async () => {
+            socks.suspend()
+            tunTransition = true
+            try {
+              await originalTun.disable()
+            } finally {
+              tunTransition = false
+              await socks.activate()
+            }
+          }),
+        ...(originalTun.uninstall
+          ? {
+              uninstall: () =>
+                serialize(async () => {
+                  socks.suspend()
+                  tunTransition = true
+                  try {
+                    await originalTun.uninstall!()
+                  } finally {
+                    tunTransition = false
+                    await socks.activate()
+                  }
+                }),
+            }
+          : {}),
+      }
+    : undefined
   const info = (): AgentInfo => ({
     hasAgent: true,
     version: AGENT_VERSION,
@@ -159,6 +266,7 @@ export function createAgent(opts: CreateAgentOptions) {
       // Config-section editor reads/writes top-level keys of the active profile.
       'config-sections',
       'visual-config-editor',
+      'socks-service',
       ...(systemProxy ? ['system-proxy'] : []),
       ...(kernelManager ? ['kernel-version'] : []),
       ...(tunController ? ['tun'] : []),
@@ -177,6 +285,8 @@ export function createAgent(opts: CreateAgentOptions) {
     tunController,
     geoProxyFetch: proxyFetch,
     settings,
+    socks,
+    serialize,
   })
   // Wire the auto-update scheduler to the same profiles store. NOT started here
   // — the server boot plugin starts it (the desktop builds its own scheduler so
@@ -196,7 +306,9 @@ export function createAgent(opts: CreateAgentOptions) {
       // running kernel picks up the new subscription (#2107). Best-effort and
       // fire-and-forget (the scheduler never awaits onResult) — a failing apply
       // must not wedge the tick loop; the next tick retries.
-      void applyActiveRefresh(profiles, supervisor, r.id).catch(() => {})
+      void serialize(() =>
+        applyActiveRefresh(profiles, supervisor, r.id),
+      ).catch(() => {})
     },
   })
   return {
@@ -209,5 +321,16 @@ export function createAgent(opts: CreateAgentOptions) {
     systemProxy,
     kernelManager,
     tunController,
+    socks,
+    enqueueRuntimeOperation: serialize.enqueue ?? serialize,
+    async dispose() {
+      scheduler.stop()
+      await socks.dispose()
+      await serialize(async () => {
+        if (tunController && (await tunController.status()).mode === 'tun')
+          await tunController.disable()
+        await supervisor.dispose()
+      })
+    },
   }
 }

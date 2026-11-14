@@ -1,7 +1,9 @@
 import type { ConfigPatchV1 } from '@metacubexd/config-editor'
-import type { App, H3Event } from 'h3'
+import type { App, EventHandler, H3Event } from 'h3'
+import type { RuntimeOperation } from './operation-queue'
 import type { ProfileConfigEditor } from './profile-editor'
 import type { AgentSettings, AgentSettingsStore } from './settings'
+import type { SocksService } from './socks-service'
 import type {
   KernelLogLine,
   KernelManager,
@@ -29,6 +31,7 @@ import {
 } from 'h3'
 import { fetchGeoAssets } from './kernel/geo'
 import { ConfigPatchConflictError, isPlainObject } from './merge'
+import { createOperationQueue } from './operation-queue'
 import {
   ProfileEditorConflictError,
   ProfileEditorValidationError,
@@ -40,6 +43,7 @@ import {
   mergeConfigOverrides,
   patchConfigOverrides,
 } from './settings'
+import { SocksConfigError } from './socks-service'
 import { TunPreconditionError } from './tun'
 import { createWebdavClient as defaultCreateWebdavClient } from './webdav'
 
@@ -88,6 +92,8 @@ export interface ControlRouterDeps {
   // Generic agent settings store (geo idle timeout today, extensible).
   // Absent => /settings 404s and geo/update uses the hardcoded default.
   settings?: AgentSettingsStore
+  socks?: SocksService
+  serialize?: RuntimeOperation
   createWebdavClient?: typeof defaultCreateWebdavClient // override for tests
   readFile?: typeof defaultReadFile // override for tests; defaults to fs/promises readFile
 }
@@ -97,6 +103,32 @@ const PREFIX = '/api/control'
 export function createControlRouter(deps: ControlRouterDeps): App {
   const app = createApp()
   const router = createRouter()
+  const serialize = deps.serialize ?? createOperationQueue()
+  // Only operations that can replace the active runtime share this boundary.
+  // Downloads, backup, raw profile edits and System Proxy must remain usable
+  // independently; in particular they must not delay an anti-lockout action.
+  // Reads/SSE never hold it, and awaited nested lifecycle calls reenter.
+  const mutation = (handler: EventHandler) =>
+    defineEventHandler((event) => {
+      const action = async () => {
+        try {
+          return await handler(event)
+        } catch (error) {
+          if (error instanceof TunPreconditionError)
+            throw createError({
+              statusCode: 409,
+              statusMessage: error.message,
+            })
+          throw error
+        }
+      }
+      const path = (event.path ?? '').split('?')[0] ?? ''
+      const changesRuntime =
+        /^\/api\/control\/(?:kernel\/(?:start|stop|restart|rollback|recover|switch)|socks|config(?:\/section)?|tun(?:\/uninstall)?|profiles\/[^/]+\/(?:activate|refresh-and-activate|editor(?:\/overlay)?))$/.test(
+          path,
+        )
+      return changesRuntime ? serialize(action) : action()
+    })
   const {
     supervisor,
     profiles,
@@ -158,15 +190,15 @@ export function createControlRouter(deps: ControlRouterDeps): App {
   )
   router.post(
     `${PREFIX}/kernel/start`,
-    defineEventHandler(() => supervisor.start()),
+    mutation(() => supervisor.start()),
   )
   router.post(
     `${PREFIX}/kernel/stop`,
-    defineEventHandler(() => supervisor.stop()),
+    mutation(() => supervisor.stop()),
   )
   router.post(
     `${PREFIX}/kernel/restart`,
-    defineEventHandler(() => supervisor.restart()),
+    mutation(() => supervisor.restart()),
   )
   // Restore the last-known-good active config (the .bak snapshot written by the
   // previous setActive) and restart. Escape hatch for a config that bricks the
@@ -174,7 +206,7 @@ export function createControlRouter(deps: ControlRouterDeps): App {
   // (#2109). 404 when no backup exists.
   router.post(
     `${PREFIX}/kernel/rollback`,
-    defineEventHandler(async (event) => {
+    mutation(async (event) => {
       const restored = await profiles.rollback()
       if (!restored) {
         setResponseStatus(event, 404)
@@ -188,7 +220,7 @@ export function createControlRouter(deps: ControlRouterDeps): App {
   // — the dashboard reconnects and the user can re-import a profile (#2109).
   router.post(
     `${PREFIX}/kernel/recover`,
-    defineEventHandler(async () => {
+    mutation(async () => {
       await profiles.resetActive()
       return supervisor.restart()
     }),
@@ -256,6 +288,39 @@ export function createControlRouter(deps: ControlRouterDeps): App {
     })
   }
 
+  // ---- Authenticated SOCKS (agent-owned, independent from subscriptions) ----
+  if (deps.socks) {
+    const socks = deps.socks
+    router.get(
+      `${PREFIX}/socks`,
+      defineEventHandler(() => socks.read()),
+    )
+    router.get(
+      `${PREFIX}/socks/targets`,
+      defineEventHandler(() => socks.targets()),
+    )
+    router.put(
+      `${PREFIX}/socks`,
+      mutation(async (event) => {
+        try {
+          return await socks.update(await readBody(event))
+        } catch (error) {
+          if (error instanceof SocksConfigError)
+            throw createError({
+              statusCode: 400,
+              statusMessage: 'invalid SOCKS configuration',
+              data: { error: error.message },
+            })
+          // Never echo request bodies, hashes or native runtime credentials.
+          throw createError({
+            statusCode: 500,
+            statusMessage: 'SOCKS settings could not be saved',
+          })
+        }
+      }),
+    )
+  }
+
   // ---- Profiles ----
   // Attach an `active` flag to each entry so the UI can persistently mark the
   // currently-active base profile (the store tracks activeId in state.json but
@@ -273,7 +338,7 @@ export function createControlRouter(deps: ControlRouterDeps): App {
   )
   router.post(
     `${PREFIX}/profiles`,
-    defineEventHandler(async (event) => {
+    mutation(async (event) => {
       const body = (await readBody(event)) as {
         name: string
         content?: string
@@ -315,7 +380,7 @@ export function createControlRouter(deps: ControlRouterDeps): App {
   )
   router.put(
     `${PREFIX}/profiles/:id`,
-    defineEventHandler(async (event) => {
+    mutation(async (event) => {
       const id = getRouterParam(event, 'id')!
       const body = (await readBody(event)) as {
         name?: string
@@ -350,7 +415,7 @@ export function createControlRouter(deps: ControlRouterDeps): App {
   )
   router.delete(
     `${PREFIX}/profiles/:id`,
-    defineEventHandler(async (event) => {
+    mutation(async (event) => {
       const id = getRouterParam(event, 'id')!
       await profiles.delete(id)
       return sendNoContent(event)
@@ -358,7 +423,7 @@ export function createControlRouter(deps: ControlRouterDeps): App {
   )
   router.post(
     `${PREFIX}/profiles/:id/duplicate`,
-    defineEventHandler(async (event) => {
+    mutation(async (event) => {
       const id = getRouterParam(event, 'id')!
       const body = (await readBody(event).catch(() => ({}))) as {
         name?: string
@@ -368,7 +433,7 @@ export function createControlRouter(deps: ControlRouterDeps): App {
   )
   router.post(
     `${PREFIX}/profiles/import`,
-    defineEventHandler(async (event) => {
+    mutation(async (event) => {
       const body = (await readBody(event)) as {
         url: string
         name?: string
@@ -387,7 +452,7 @@ export function createControlRouter(deps: ControlRouterDeps): App {
   )
   router.post(
     `${PREFIX}/profiles/:id/refresh`,
-    defineEventHandler(async (event) => {
+    mutation(async (event) => {
       const id = getRouterParam(event, 'id')!
       const body = (await readBody(event).catch(() => ({}))) as {
         useProxy?: boolean
@@ -407,7 +472,7 @@ export function createControlRouter(deps: ControlRouterDeps): App {
   // re-fetch path keeps its stable ProfileMeta response shape.
   router.post(
     `${PREFIX}/profiles/:id/refresh-and-activate`,
-    defineEventHandler(async (event) => {
+    mutation(async (event) => {
       const id = getRouterParam(event, 'id')!
       const body = (await readBody(event).catch(() => ({}))) as {
         useProxy?: boolean
@@ -421,14 +486,14 @@ export function createControlRouter(deps: ControlRouterDeps): App {
   )
   router.post(
     `${PREFIX}/profiles/:id/activate`,
-    defineEventHandler(async (event) => {
+    mutation(async (event) => {
       const id = getRouterParam(event, 'id')!
       return safeActivate(id)
     }),
   )
   router.post(
     `${PREFIX}/profiles/:id/validate`,
-    defineEventHandler(async (event) => {
+    mutation(async (event) => {
       const id = getRouterParam(event, 'id')!
       const content = await profiles.read(id)
       // Materialize a temp candidate file so `mihomo -t -f <path>` runs against a
@@ -490,7 +555,7 @@ export function createControlRouter(deps: ControlRouterDeps): App {
     )
     router.post(
       `${PREFIX}/profiles/:id/editor/preview`,
-      defineEventHandler(async (event) => {
+      mutation(async (event) => {
         const id = getRouterParam(event, 'id')!
         const patch = await readEditorPatch(event)
         return withEditorError(() => profileEditor.preview(id, patch))
@@ -498,7 +563,7 @@ export function createControlRouter(deps: ControlRouterDeps): App {
     )
     router.put(
       `${PREFIX}/profiles/:id/editor`,
-      defineEventHandler(async (event) => {
+      mutation(async (event) => {
         const id = getRouterParam(event, 'id')!
         const patch = await readEditorPatch(event)
         return withEditorError(() => profileEditor.apply(id, patch))
@@ -506,7 +571,7 @@ export function createControlRouter(deps: ControlRouterDeps): App {
     )
     router.delete(
       `${PREFIX}/profiles/:id/editor/overlay`,
-      defineEventHandler(async (event) => {
+      mutation(async (event) => {
         const id = getRouterParam(event, 'id')!
         const kernel = await withEditorError(() =>
           profileEditor.resetManagedOverlay(id),
@@ -527,7 +592,7 @@ export function createControlRouter(deps: ControlRouterDeps): App {
   )
   router.put(
     `${PREFIX}/config`,
-    defineEventHandler(async (event) => {
+    mutation(async (event) => {
       const activeId = await profiles.getActiveId()
       if (!activeId) {
         setResponseStatus(event, 409)
@@ -575,7 +640,7 @@ export function createControlRouter(deps: ControlRouterDeps): App {
   )
   router.put(
     `${PREFIX}/config/section`,
-    defineEventHandler(async (event) => {
+    mutation(async (event) => {
       const activeId = await profiles.getActiveId()
       if (!activeId) {
         setResponseStatus(event, 409)
@@ -620,7 +685,7 @@ export function createControlRouter(deps: ControlRouterDeps): App {
   )
   router.put(
     `${PREFIX}/settings`,
-    defineEventHandler(async (event) => {
+    mutation(async (event) => {
       if (!settings) throw createError({ statusCode: 404 })
       const body = (await readBody(event)) as {
         geoIdleTimeoutMs?: number
@@ -693,7 +758,7 @@ export function createControlRouter(deps: ControlRouterDeps): App {
   // ---- Geo assets (always available — backed by homeDir + fetch) ----
   router.post(
     `${PREFIX}/geo/update`,
-    defineEventHandler(async (event) => {
+    mutation(async (event) => {
       const body = (await readBody(event).catch(() => ({}))) as {
         useProxy?: boolean
       }
@@ -719,7 +784,7 @@ export function createControlRouter(deps: ControlRouterDeps): App {
 
   router.post(
     `${PREFIX}/backup`,
-    defineEventHandler(async (event) => {
+    mutation(async (event) => {
       const body = (await readBody(event)) as {
         webdav: WebdavCredentials
         uiSettings?: unknown
@@ -758,7 +823,7 @@ export function createControlRouter(deps: ControlRouterDeps): App {
 
   router.post(
     `${PREFIX}/restore`,
-    defineEventHandler(async (event) => {
+    mutation(async (event) => {
       const body = (await readBody(event)) as { webdav: WebdavCredentials }
       const { webdav } = body
       const client = createWebdavClient({
@@ -829,7 +894,7 @@ export function createControlRouter(deps: ControlRouterDeps): App {
     )
     router.post(
       `${PREFIX}/sysproxy`,
-      defineEventHandler(async (event) => {
+      mutation(async (event) => {
         const body = (await readBody(event)) as {
           enabled: boolean
           bypass?: string[]
@@ -883,7 +948,7 @@ export function createControlRouter(deps: ControlRouterDeps): App {
     )
     router.post(
       `${PREFIX}/kernel/switch`,
-      defineEventHandler(async (event) => {
+      mutation(async (event) => {
         const body = (await readBody(event)) as { version: string }
         await kernelManager.switch(body.version)
         return { ok: true }
@@ -916,7 +981,7 @@ export function createControlRouter(deps: ControlRouterDeps): App {
     )
     router.post(
       `${PREFIX}/tun`,
-      defineEventHandler(async (event) => {
+      mutation(async (event) => {
         const body = (await readBody(event)) as {
           enabled: boolean
           stack?: string
@@ -951,7 +1016,7 @@ export function createControlRouter(deps: ControlRouterDeps): App {
     router.post(
       `${PREFIX}/tun/uninstall`,
       uninstall
-        ? defineEventHandler(async () => {
+        ? mutation(async () => {
             await uninstall()
             return tunController.status()
           })

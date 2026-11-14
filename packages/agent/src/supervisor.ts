@@ -1,5 +1,6 @@
 import type { Buffer } from 'node:buffer'
 import type { ChildProcess } from 'node:child_process'
+import type { RuntimeOperation } from './operation-queue'
 import type { ConfigOverrides, ConfigOverrideValue } from './settings'
 import type {
   KernelLogLine,
@@ -8,9 +9,9 @@ import type {
   SupervisorOptions,
 } from './types'
 import { spawn as nodeSpawn } from 'node:child_process'
-import { randomBytes } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile, rename, rm, writeFile } from 'node:fs/promises'
 import treeKillDefault from 'tree-kill'
 import { parse, stringify } from 'yaml'
 import { sanitizeConfigOverrides } from './settings'
@@ -38,6 +39,11 @@ export type CreateSupervisorOptions = SupervisorOptions & {
   // asynchronously); non-scalar values are skipped.
   configOverrides?:
     Record<string, unknown> | (() => Promise<Record<string, unknown>>)
+  // Agent-owned final runtime preparation and lifecycle hooks. The same queue
+  // also orders authenticated SOCKS changes and privileged helper handoffs.
+  transformConfig?: (content: string) => Promise<string>
+  serialize?: RuntimeOperation
+  onReady?: () => Promise<void>
 }
 
 // Top-level keys the supervisor owns: they are stripped from the profile and
@@ -119,7 +125,7 @@ export function createSupervisor(
   // Mutable so the kernel binary can be swapped at runtime (takes effect on the
   // next start/validate spawn — the live process keeps the path it was started with).
   let binaryPath = opts.binaryPath
-  const run = createMutex()
+  const run: RuntimeOperation = opts.serialize ?? createMutex()
 
   // Crash watchdog: a user-initiated stop sets intentionalStop so proc 'exit'
   // is not misread as a crash. restartCount counts consecutive auto-restarts and
@@ -272,7 +278,18 @@ export function createSupervisor(
       ...overrideLines,
       '',
     ].join('\n')
-    await writeFile(opts.activeConfigPath, header + kept)
+    const content = opts.transformConfig
+      ? await opts.transformConfig(header + kept)
+      : header + kept
+    const temporary = `${opts.activeConfigPath}.${randomUUID()}.tmp`
+    try {
+      // mode on writeFile does not tighten an existing file. Replace it with a
+      // private temporary file BEFORE exposing any generated listener secret.
+      await writeFile(temporary, content, { mode: 0o600 })
+      await rename(temporary, opts.activeConfigPath)
+    } finally {
+      await rm(temporary, { force: true })
+    }
   }
 
   function cancelStabilityReset(): void {
@@ -300,7 +317,9 @@ export function createSupervisor(
     if (restartTimer !== undefined) clearTimer(restartTimer)
     restartTimer = setTimer(() => {
       restartTimer = undefined
-      void run(doStart)
+      // The watchdog is autonomous, not an awaited nested lifecycle call. Its
+      // timer may inherit the still-active onReady/probe ALS context.
+      void (run.enqueue ?? run)(doStart)
     }, restartBackoffMs)
   }
 
@@ -361,6 +380,7 @@ export function createSupervisor(
       setState({ status: 'errored', lastError: 'ready timeout' })
       killProc('SIGKILL')
     }
+    if (ready) await opts.onReady?.()
     return { ...state }
   }
 
